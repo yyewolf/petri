@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	aggregatorapiserver "k8s.io/kube-aggregator/pkg/apiserver"
+
+	"github.com/yyewolf/petri/internal/controllers"
 )
 
 const (
@@ -31,6 +33,10 @@ type ControlPlane struct {
 	stopServer context.CancelFunc // stops kube-apiserver
 	stopKine   context.CancelFunc // stops kine; only after kube-apiserver exits, so its shutdown can still reach storage
 	kineWG     *sync.WaitGroup
+
+	// manager runs the built-in controllers; none are enabled yet. It is
+	// created in boot and released by Stop.
+	manager *controllers.Manager
 
 	webhookCA *webhookCA // generated at startup; signs webhook serving certificates
 	shared    bool       // set on the plane Start hands out; conversion webhooks are refused there
@@ -93,6 +99,14 @@ func (cp *ControlPlane) Client() *kubernetes.Clientset {
 func (cp *ControlPlane) Stop() error {
 	cp.stopOnce.Do(func() {
 		cp.stopped.Store(true)
+
+		// Controllers go first: they stop writing before the API server
+		// dies, and Stop does not return until everything the manager
+		// started has exited.
+		if cp.manager != nil {
+			cp.manager.Stop()
+		}
+
 		cp.stopServer()
 
 		if cp.done != nil {
@@ -167,6 +181,13 @@ func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context) error {
 	cp.client, err = kubernetes.NewForConfig(cp.clientConfig())
 	if err != nil {
 		return errors.Join(fmt.Errorf("build client: %w", err), opts.SecureServing.Listener.Close())
+	}
+
+	// The manager is offline and cheap: informers start only when a
+	// controller is enabled, and the RESTMapper discovers on first use.
+	cp.manager, err = controllers.New(serverCtx, cp.Config())
+	if err != nil {
+		return errors.Join(fmt.Errorf("build controller manager: %w", err), opts.SecureServing.Listener.Close())
 	}
 
 	cp.done = make(chan struct{})

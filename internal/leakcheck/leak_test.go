@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yyewolf/petri"
+	"github.com/yyewolf/petri/internal/controllers"
 )
 
 const (
@@ -23,7 +24,10 @@ const (
 	stableFor     = 4 * time.Second
 	settleTimeout = 30 * time.Second
 	startTimeout  = 2 * time.Minute
-	maxDumpBytes  = 20000
+	// stubRunTimeout bounds how long the stub controller may take to run
+	// after its informers synced, which on a healthy plane is immediate.
+	stubRunTimeout = 10 * time.Second
+	maxDumpBytes   = 20000
 )
 
 func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
@@ -45,6 +49,9 @@ func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
 	}
 }
 
+// cycle starts and stops one control plane whose manager enabled a stub
+// controller, so every cycle exercises informer startup, cache sync, the
+// informers-started signal and the full release of both manager and plane.
 func cycle(t *testing.T) {
 	t.Helper()
 
@@ -56,9 +63,53 @@ func cycle(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
+	runStubController(t, cp)
+
 	if err = cp.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
+}
+
+// runStubController enables a stub controller on cp through the manager
+// registry. Its build registers a real ConfigMap informer, so the manager
+// starts real informer goroutines, waits for the cache and joins them again
+// at its own Stop, mirroring how Stop releases the plane's manager. Zero real
+// controllers exist yet; enabling them through the public API grows this
+// test.
+func runStubController(t *testing.T, cp *petri.ControlPlane) {
+	t.Helper()
+
+	mgr, err := controllers.New(t.Context(), cp.Config())
+	if err != nil {
+		t.Fatalf("New manager: %v", err)
+	}
+
+	ran := make(chan struct{})
+
+	spec := controllers.Spec{
+		Name: "leakcheck-stub",
+		Build: func(_ context.Context, m *controllers.Manager) (controllers.Run, error) {
+			_ = m.KubeFactory().Core().V1().ConfigMaps().Informer()
+
+			return func(context.Context) { close(ran) }, nil
+		},
+	}
+
+	if err = mgr.Register(spec); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if err = mgr.Enable(spec.Name); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	select {
+	case <-ran:
+	case <-time.After(stubRunTimeout):
+		t.Fatal("stub controller never ran")
+	}
+
+	mgr.Stop()
 }
 
 // stableCount waits until the goroutine count has not changed for stableFor

@@ -2,6 +2,7 @@ package petri
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -63,7 +65,12 @@ func randomSuffix() string {
 	return string(b)
 }
 
-const namespaceCleanupTimeout = 30 * time.Second
+const (
+	namespaceCleanupTimeout = 30 * time.Second
+	// namespaceAttempts bounds retries when a random suffix collides with an
+	// existing namespace, which stays Terminating once deleted.
+	namespaceAttempts = 5
+)
 
 // Namespace creates a namespace named after the test plus a random suffix and
 // deletes it when the test finishes. Until petri runs the namespace
@@ -73,11 +80,9 @@ func (cp *ControlPlane) Namespace(t testing.TB) string {
 
 	client := cp.Client()
 
-	name := namespaceName(t.Name(), randomSuffix())
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
-
-	if _, err := client.CoreV1().Namespaces().Create(t.Context(), ns, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("petri: create namespace %q: %v", name, err)
+	name, err := createNamespace(t.Context(), client, t.Name(), randomSuffix)
+	if err != nil {
+		t.Fatalf("petri: create namespace for %s: %v", t.Name(), err)
 	}
 
 	t.Cleanup(func() {
@@ -93,4 +98,28 @@ func (cp *ControlPlane) Namespace(t testing.TB) string {
 	})
 
 	return name
+}
+
+// createNamespace creates a namespace named after testName plus a suffix from
+// suffix, drawing a new suffix when the name is already taken.
+func createNamespace(
+	ctx context.Context, client kubernetes.Interface, testName string, suffix func() string,
+) (string, error) {
+	var err error
+
+	for range namespaceAttempts {
+		name := namespaceName(testName, suffix())
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+
+		_, err = client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+		if err == nil {
+			return name, nil
+		}
+
+		if !apierrors.IsAlreadyExists(err) {
+			return "", fmt.Errorf("create namespace %q: %w", name, err)
+		}
+	}
+
+	return "", fmt.Errorf("no free namespace name after %d attempts: %w", namespaceAttempts, err)
 }

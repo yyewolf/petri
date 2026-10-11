@@ -4,6 +4,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -52,5 +57,39 @@ func TestRandomSuffix(t *testing.T) {
 
 	if len(seen) < 45 {
 		t.Errorf("only %d distinct suffixes in 50 draws", len(seen))
+	}
+}
+
+func TestCreateNamespaceRetriesOnNameCollision(t *testing.T) {
+	t.Parallel()
+
+	taken := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "testfoo-aaaaa"}}
+	client := fake.NewClientset(taken)
+
+	suffixes := []string{"aaaaa", "bbbbb"}
+	next := func() string {
+		s := suffixes[0]
+		suffixes = suffixes[1:]
+
+		return s
+	}
+
+	name, err := createNamespace(t.Context(), client, "TestFoo", next)
+	if err != nil {
+		t.Fatalf("createNamespace: %v", err)
+	}
+	if name != "testfoo-bbbbb" {
+		t.Errorf("name = %q, want testfoo-bbbbb after the first suffix collided", name)
+	}
+}
+
+func TestCreateNamespaceGivesUpAfterRepeatedCollisions(t *testing.T) {
+	t.Parallel()
+
+	client := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "testfoo-aaaaa"}})
+
+	_, err := createNamespace(t.Context(), client, "TestFoo", func() string { return "aaaaa" })
+	if !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("err = %v, want AlreadyExists once retries run out", err)
 	}
 }

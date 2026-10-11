@@ -3,15 +3,15 @@
 ## Prerequisites
 
 - Go 1.26 or newer
-- [golangci-lint](https://golangci-lint.run/) v2 on your `PATH`
+- [golangci-lint](https://golangci-lint.run/) v2.14 or newer on your `PATH`
 - GNU make
 
 ## Common tasks
 
 ```sh
 make test   # go test -race ./...
-make lint   # golangci-lint run
-make fmt    # format with gofumpt and goimports
+make lint   # golangci-lint config verify + run
+make fmt    # format with goimports and golines
 make tidy   # go mod tidy
 ```
 

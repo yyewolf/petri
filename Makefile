@@ -9,6 +9,7 @@ test: ## Run tests with the race detector
 	go test -race ./...
 
 lint: ## Run golangci-lint
+	golangci-lint config verify
 	golangci-lint run
 
 fmt: ## Format code with the golangci-lint formatters

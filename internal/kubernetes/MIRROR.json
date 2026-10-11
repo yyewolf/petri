@@ -2,6 +2,20 @@
   "kubernetes": "v1.37.1",
   "roots": [
     "k8s.io/kubernetes/cmd/kube-apiserver/app",
-    "k8s.io/kubernetes/cmd/kube-apiserver/app/options"
+    "k8s.io/kubernetes/cmd/kube-apiserver/app/options",
+    "k8s.io/kubernetes/pkg/controller",
+    "k8s.io/kubernetes/pkg/controller/namespace",
+    "k8s.io/kubernetes/pkg/controller/garbagecollector",
+    "k8s.io/kubernetes/pkg/controller/deployment",
+    "k8s.io/kubernetes/pkg/controller/replicaset",
+    "k8s.io/kubernetes/pkg/controller/statefulset",
+    "k8s.io/kubernetes/pkg/controller/daemon",
+    "k8s.io/kubernetes/pkg/controller/job",
+    "k8s.io/kubernetes/pkg/controller/cronjob",
+    "k8s.io/kubernetes/pkg/controller/endpointslice",
+    "k8s.io/kubernetes/pkg/controller/serviceaccount",
+    "k8s.io/kubernetes/pkg/controller/resourcequota",
+    "k8s.io/kubernetes/pkg/controller/ttlafterfinished",
+    "k8s.io/kubernetes/pkg/controller/disruption"
   ]
 }

@@ -71,7 +71,10 @@ jobs:
       - name: Build without cgo
         run: CGO_ENABLED=0 go build ./...
 
-      - name: Cross-build the mirror
+      # Every platform the mirror's file set is computed for, besides this one.
+      - name: Cross-build
         run: |
-          GOOS=darwin GOARCH=arm64 go build ./...
-          GOOS=windows GOARCH=amd64 go build ./internal/kubernetes/...
+          for platform in darwin/amd64 darwin/arm64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "$platform"
+            GOOS=${platform%/*} GOARCH=${platform#*/} go build ./...
+          done

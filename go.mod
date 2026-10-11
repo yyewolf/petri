@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/opencontainers/selinux v1.15.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/otel/trace v1.44.0

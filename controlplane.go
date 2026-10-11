@@ -54,11 +54,13 @@ func New(ctx context.Context) (*ControlPlane, error) {
 }
 
 // Config returns a new admin (system:masters) client config for the control
-// plane on every call, with high client-side rate limits.
+// plane on every call, with high client-side rate limits. Like envtest, it
+// leaves the content type empty so clients default to JSON, which every type,
+// CRDs included, can encode.
 func (cp *ControlPlane) Config() *rest.Config {
-	cfg := rest.CopyConfig(cp.config)
-	cfg.QPS = clientQPS
-	cfg.Burst = clientBurst
+	cfg := cp.clientConfig()
+	cfg.ContentType = ""
+	cfg.AcceptContentTypes = ""
 
 	return cfg
 }
@@ -86,6 +88,16 @@ func (cp *ControlPlane) Stop() error {
 	})
 
 	return cp.stopErr
+}
+
+// clientConfig copies the loopback config, which negotiates protobuf, with
+// high client-side rate limits. Client uses it: built-in types encode as protobuf.
+func (cp *ControlPlane) clientConfig() *rest.Config {
+	cfg := rest.CopyConfig(cp.config)
+	cfg.QPS = clientQPS
+	cfg.Burst = clientBurst
+
+	return cfg
 }
 
 func (cp *ControlPlane) stoppedAlready() bool {
@@ -128,7 +140,7 @@ func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context) error {
 
 	cp.config = rest.CopyConfig(server.GenericAPIServer.LoopbackClientConfig)
 
-	cp.client, err = kubernetes.NewForConfig(cp.Config())
+	cp.client, err = kubernetes.NewForConfig(cp.clientConfig())
 	if err != nil {
 		return errors.Join(fmt.Errorf("build client: %w", err), opts.SecureServing.Listener.Close())
 	}

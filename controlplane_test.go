@@ -157,3 +157,16 @@ func TestClientTalksToTheControlPlane(t *testing.T) {
 		t.Error("Client() built a new clientset on each call; want one shared clientset")
 	}
 }
+
+func TestConfigNegotiatesJSONLikeEnvtest(t *testing.T) {
+	t.Parallel()
+
+	// A protobuf default would make typed clients fail for CRD types, which
+	// have no protobuf encoding (controller-runtime uses a non-empty
+	// ContentType for every GVK).
+	cfg := petri.Start(t).Config()
+	if cfg.ContentType != "" || cfg.AcceptContentTypes != "" {
+		t.Errorf("Config() content types = %q / %q, want both empty so clients default to JSON",
+			cfg.ContentType, cfg.AcceptContentTypes)
+	}
+}

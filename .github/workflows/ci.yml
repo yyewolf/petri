@@ -38,3 +38,32 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14
+
+  mirror-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate the mirror
+        run: make mirror
+
+      - name: Fail on drift
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain
+            git diff --stat
+            echo "::error::internal/kubernetes or go.mod differs from 'make mirror' output. Never edit the mirror by hand; run 'make mirror' and commit the result."
+            exit 1
+          fi
+
+      - name: Build without cgo
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: Cross-build the mirror
+        run: |
+          GOOS=darwin GOARCH=arm64 go build ./...
+          GOOS=windows GOARCH=amd64 go build ./internal/kubernetes/...

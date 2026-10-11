@@ -1,17 +1,8 @@
 version: 2
 updates:
+  # Go modules are pinned by `make mirror` to the versions upstream Kubernetes
+  # uses, and updated by the mirror workflow, so Dependabot only handles actions.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-
-  - package-ecosystem: gomod
-    directory: /
-    schedule:
-      interval: weekly
-    ignore:
-      # Kubernetes minors map to petri release lines and are bumped by hand.
-      - dependency-name: "k8s.io/*"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "sigs.k8s.io/*"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]

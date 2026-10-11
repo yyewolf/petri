@@ -131,3 +131,29 @@ func TestStopReturnsPromptly(t *testing.T) {
 		t.Errorf("Stop took %v, want under 30s", elapsed)
 	}
 }
+
+func TestClientTalksToTheControlPlane(t *testing.T) {
+	t.Parallel()
+
+	env := petri.Start(t)
+	ns := env.Namespace(t)
+
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "via-client"}}
+	if _, err := env.Client().CoreV1().ConfigMaps(ns).Create(t.Context(), cm, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create through Client(): %v", err)
+	}
+
+	// Client() and Config() must reach the same control plane.
+	got, err := clientFor(t, env.Config()).CoreV1().ConfigMaps(ns).Get(t.Context(), "via-client", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get through Config(): %v", err)
+	}
+	if got.Name != "via-client" {
+		t.Errorf("got ConfigMap %q, want via-client", got.Name)
+	}
+
+	first, second := env.Client(), env.Client()
+	if first != second {
+		t.Error("Client() built a new clientset on each call; want one shared clientset")
+	}
+}

@@ -10,7 +10,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -72,15 +71,12 @@ const namespaceCleanupTimeout = 30 * time.Second
 func (cp *ControlPlane) Namespace(t testing.TB) string {
 	t.Helper()
 
-	client, err := kubernetes.NewForConfig(cp.Config())
-	if err != nil {
-		t.Fatalf("petri: namespace client: %v", err)
-	}
+	client := cp.Client()
 
 	name := namespaceName(t.Name(), randomSuffix())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 
-	if _, err = client.CoreV1().Namespaces().Create(t.Context(), ns, metav1.CreateOptions{}); err != nil {
+	if _, err := client.CoreV1().Namespaces().Create(t.Context(), ns, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("petri: create namespace %q: %v", name, err)
 	}
 

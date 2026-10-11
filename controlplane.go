@@ -32,6 +32,9 @@ type ControlPlane struct {
 	stopKine   context.CancelFunc // stops kine; only after kube-apiserver exits, so its shutdown can still reach storage
 	kineWG     *sync.WaitGroup
 
+	webhookCA *webhookCA // generated at startup; signs webhook serving certificates
+	shared    bool       // set on the plane Start hands out; conversion webhooks are refused there
+
 	done     chan struct{} // closed when the server goroutine returns; nil until it starts
 	serveErr error         // written before done is closed
 
@@ -137,6 +140,13 @@ func start(ctx context.Context) (*ControlPlane, error) {
 // boot starts kine under kineCtx and kube-apiserver under serverCtx, then
 // waits, bounded by ctx, until the API server is ready.
 func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context) error {
+	ca, err := newWebhookCA()
+	if err != nil {
+		return err
+	}
+
+	cp.webhookCA = ca
+
 	servers, err := startKine(kineCtx, cp.kineWG)
 	if err != nil {
 		return err

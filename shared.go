@@ -49,6 +49,11 @@ func (s *sharedPlane) get() (*ControlPlane, error) {
 		defer cancel()
 
 		s.cp, s.err = s.start(ctx)
+		if s.cp != nil {
+			// Mark before the plane is handed out: conversion webhooks
+			// rewrite CRDs for every test, so they are refused here.
+			s.cp.shared = true
+		}
 	})
 
 	if s.err == nil || !s.reported.Swap(true) {

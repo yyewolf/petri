@@ -69,7 +69,9 @@ func randomSuffix() string {
 }
 
 const (
-	namespaceCleanupTimeout = 30 * time.Second
+	// cleanupTimeout bounds deletions registered on test cleanup, which must
+	// not hang the suite when the control plane is wedged.
+	cleanupTimeout = 30 * time.Second
 	// namespaceAttempts bounds retries when a random suffix collides with an
 	// existing namespace, which stays Terminating once deleted.
 	namespaceAttempts = 5
@@ -89,7 +91,7 @@ func (cp *ControlPlane) Namespace(t testing.TB) string {
 	}
 
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), namespaceCleanupTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
 
 		background := metav1.DeletePropagationBackground

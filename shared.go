@@ -12,10 +12,11 @@ import (
 
 const sharedStartTimeout = 2 * time.Minute
 
-// shared is the control plane Start hands out: one per test binary.
+// shared is the control plane Start hands out: one per test binary. The
+// shared plane always runs the default controllers; Start takes no options.
 //
 //nolint:gochecknoglobals // Start shares one control plane per test binary by design.
-var shared = &sharedPlane{start: New}
+var shared = &sharedPlane{start: func(ctx context.Context) (*ControlPlane, error) { return New(ctx) }}
 
 // sharedPlane starts a control plane on first use and caches the outcome,
 // failure included, for every later caller.

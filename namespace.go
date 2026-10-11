@@ -78,8 +78,11 @@ const (
 )
 
 // Namespace creates a namespace named after the test plus a random suffix and
-// deletes it when the test finishes. Until petri runs the namespace
-// controller, a deleted namespace stays Terminating with its contents.
+// deletes it when the test finishes. The namespace controller runs by default,
+// so the cleanup actually frees the namespace: once its contents are deleted,
+// the namespace itself is removed rather than lingering as Terminating. Start
+// a plane with [WithoutDefaultControllers] for envtest's behaviour, where
+// deleted namespaces stay Terminating forever.
 func (cp *ControlPlane) Namespace(t testing.TB) string {
 	t.Helper()
 

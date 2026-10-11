@@ -34,8 +34,9 @@ type ControlPlane struct {
 	stopKine   context.CancelFunc // stops kine; only after kube-apiserver exits, so its shutdown can still reach storage
 	kineWG     *sync.WaitGroup
 
-	// manager runs the built-in controllers; none are enabled yet. It is
-	// created in boot and released by Stop.
+	// manager runs the built-in controllers; the default set is enabled in
+	// boot unless the plane was started without it. It is created in boot and
+	// released by Stop.
 	manager *controllers.Manager
 
 	webhookCA *webhookCA // generated at startup; signs webhook serving certificates
@@ -49,12 +50,46 @@ type ControlPlane struct {
 	stopped  atomic.Bool
 }
 
+// startOptions is the resolved Option list of a New call.
+type startOptions struct {
+	// defaultControllers enables the namespace controller and the garbage
+	// collector during startup.
+	defaultControllers bool
+}
+
+// Option adjusts how New starts a dedicated control plane.
+type Option func(*startOptions)
+
+// WithoutDefaultControllers starts the control plane without the built-in
+// controllers petri runs by default, the namespace controller and the garbage
+// collector. Deleted namespaces then stay Terminating with their contents, and
+// deleting an owner leaves its dependents behind: the semantics of envtest,
+// which runs no controllers. Use it for tests that rely on envtest behaviour;
+// with the defaults, a deleted namespace really goes away and ownerReferences
+// cascade.
+//
+// The shared control plane (Start) and the envtest drop-in always run the
+// defaults.
+func WithoutDefaultControllers() Option {
+	return func(o *startOptions) { o.defaultControllers = false }
+}
+
 // New starts a dedicated control plane. ctx bounds startup only; call Stop to
 // shut it down.
-func New(ctx context.Context) (*ControlPlane, error) {
+//
+// By default the plane runs the namespace controller and the garbage collector,
+// and New returns only once their informers are synced, so the first object a
+// test creates right after startup is seen by both. Pass
+// [WithoutDefaultControllers] to start without them.
+func New(ctx context.Context, opts ...Option) (*ControlPlane, error) {
 	logs := processLog()
 
-	cp, err := start(ctx)
+	options := startOptions{defaultControllers: true}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	cp, err := start(ctx, options)
 	if err != nil {
 		return nil, &startError{err: err, logs: logs.String()}
 	}
@@ -135,7 +170,7 @@ func (cp *ControlPlane) stoppedAlready() bool {
 	return cp.stopped.Load()
 }
 
-func start(ctx context.Context) (*ControlPlane, error) {
+func start(ctx context.Context, options startOptions) (*ControlPlane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("before startup: %w", err)
 	}
@@ -144,16 +179,17 @@ func start(ctx context.Context) (*ControlPlane, error) {
 	kineCtx, stopKine := context.WithCancel(context.Background())
 	cp := &ControlPlane{stopServer: stopServer, stopKine: stopKine, kineWG: &sync.WaitGroup{}}
 
-	if err := cp.boot(ctx, serverCtx, kineCtx); err != nil {
+	if err := cp.boot(ctx, serverCtx, kineCtx, options); err != nil {
 		return nil, withStopError(err, cp.Stop())
 	}
 
 	return cp, nil
 }
 
-// boot starts kine under kineCtx and kube-apiserver under serverCtx, then
-// waits, bounded by ctx, until the API server is ready.
-func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context) error {
+// boot starts kine under kineCtx and kube-apiserver under serverCtx, waits,
+// bounded by ctx, until the API server is ready, and then enables the default
+// controllers unless the plane was started without them.
+func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context, options startOptions) error {
 	ca, err := newWebhookCA()
 	if err != nil {
 		return err
@@ -194,7 +230,23 @@ func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context) error {
 
 	go cp.serve(serverCtx, server)
 
-	return cp.waitReady(ctx)
+	err = cp.waitReady(ctx)
+	if err != nil {
+		return err
+	}
+
+	// The controllers start after the API server is ready, and startup does
+	// not return until their informers are synced. The manager runs on
+	// serverCtx, so a boot that fails here is unwound by the Stop that start
+	// performs on the error.
+	if options.defaultControllers {
+		err = cp.manager.EnableDefaults(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (cp *ControlPlane) serve(ctx context.Context, server *aggregatorapiserver.APIAggregator) {

@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/yyewolf/petri"
 	"github.com/yyewolf/petri/internal/controllers"
 )
@@ -47,12 +50,61 @@ func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
 		t.Fatalf("%d goroutines after %d New/Stop cycles, want at most %d (baseline %d + %d)\n%s",
 			n, cycles, baseline+slack, baseline, slack, goroutineDump())
 	}
+
+	// The standalone-manager path keeps working beside the defaults: a second
+	// manager enabled on a plane that already runs the default controllers
+	// must release its informers all the same.
+	for range cycles {
+		stubCycle(t)
+	}
+
+	if n := waitAtMost(t, baseline+slack); n > baseline+slack {
+		t.Fatalf("%d goroutines after %d stub-manager cycles, want at most %d (baseline %d + %d)\n%s",
+			n, cycles, baseline+slack, baseline, slack, goroutineDump())
+	}
 }
 
-// cycle starts and stops one control plane whose manager enabled a stub
-// controller, so every cycle exercises informer startup, cache sync, the
-// informers-started signal and the full release of both manager and plane.
+// cycle starts and stops one control plane running its default controllers,
+// the namespace controller and the garbage collector, with a namespace and a
+// ConfigMap in flight so the controllers have real work when Stop releases
+// their informers, workers and graph-builder goroutines.
 func cycle(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), startTimeout)
+	defer cancel()
+
+	cp, err := petri.New(ctx)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ns, err := cp.NewNamespace(ctx)
+	if err != nil {
+		t.Fatalf("NewNamespace: %v", err)
+	}
+
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "churn"}}
+	if _, err = cp.Client().CoreV1().ConfigMaps(ns).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create configmap: %v", err)
+	}
+
+	background := metav1.DeletePropagationBackground
+	deleteOpts := metav1.DeleteOptions{PropagationPolicy: &background}
+	if err = cp.Client().CoreV1().Namespaces().Delete(ctx, ns, deleteOpts); err != nil {
+		t.Fatalf("delete namespace: %v", err)
+	}
+
+	if err = cp.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
+
+// stubCycle starts one control plane and enables a stub controller on it
+// through a second manager's registry. The stub's build registers a real
+// ConfigMap informer, so the standalone manager starts real informer
+// goroutines, waits for the cache and joins them again at its own Stop.
+func stubCycle(t *testing.T) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(t.Context(), startTimeout)
@@ -70,12 +122,10 @@ func cycle(t *testing.T) {
 	}
 }
 
-// runStubController enables a stub controller on cp through the manager
+// runStubController enables a stub controller on cp through a manager
 // registry. Its build registers a real ConfigMap informer, so the manager
 // starts real informer goroutines, waits for the cache and joins them again
-// at its own Stop, mirroring how Stop releases the plane's manager. Zero real
-// controllers exist yet; enabling them through the public API grows this
-// test.
+// at its own Stop, mirroring how Stop releases the plane's manager.
 func runStubController(t *testing.T, cp *petri.ControlPlane) {
 	t.Helper()
 

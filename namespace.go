@@ -18,6 +18,9 @@ const (
 	maxNamespaceLen = 63
 	suffixLen       = 5
 	suffixAlphabet  = "abcdefghijklmnopqrstuvwxyz0123456789"
+	// namespacePrefix names the namespaces NewNamespace creates, which have no
+	// test name to derive one from.
+	namespacePrefix = "petri"
 )
 
 // namespaceName derives a valid namespace name from a test name: lowercase
@@ -98,6 +101,13 @@ func (cp *ControlPlane) Namespace(t testing.TB) string {
 	})
 
 	return name
+}
+
+// NewNamespace creates a namespace with a random name and no test-name prefix,
+// for helpers and tests that manage their own lifecycle: the caller owns
+// deletion. It retries on name collisions like Namespace does.
+func (cp *ControlPlane) NewNamespace(ctx context.Context) (string, error) {
+	return createNamespace(ctx, cp.Client(), namespacePrefix, randomSuffix)
 }
 
 // createNamespace creates a namespace named after testName plus a suffix from

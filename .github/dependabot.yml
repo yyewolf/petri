@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Kubernetes minors map to petri release lines and are bumped by hand.
+      - dependency-name: "k8s.io/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "sigs.k8s.io/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

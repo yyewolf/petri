@@ -2,7 +2,10 @@ package petri
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,14 +22,16 @@ var shared = &sharedPlane{start: New}
 type sharedPlane struct {
 	start func(context.Context) (*ControlPlane, error)
 
-	once sync.Once
-	cp   *ControlPlane
-	err  error
+	once     sync.Once
+	cp       *ControlPlane
+	err      error
+	reported atomic.Bool // whether a caller already got err with the startup logs
 }
 
 // Start returns the control plane shared by every test in the binary,
-// starting it on first use. If startup fails, every caller fails with the same
-// error. The shared control plane lives until the test binary exits.
+// starting it on first use. If startup fails, every caller fails; only the
+// first one prints the startup logs. The shared control plane lives until the
+// test binary exits.
 func Start(t testing.TB) *ControlPlane {
 	t.Helper()
 
@@ -46,5 +51,17 @@ func (s *sharedPlane) get() (*ControlPlane, error) {
 		s.cp, s.err = s.start(ctx)
 	})
 
-	return s.cp, s.err
+	if s.err == nil || !s.reported.Swap(true) {
+		return s.cp, s.err
+	}
+
+	// The logs went to the first caller; repeating them in every test buries
+	// the output.
+	cause := s.err
+	if se, ok := errors.AsType[*startError](s.err); ok {
+		cause = se.err
+	}
+
+	return nil, fmt.Errorf(
+		"petri: shared control plane failed to start (logs printed by the first test that called Start): %w", cause)
 }

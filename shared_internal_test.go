@@ -3,6 +3,7 @@ package petri
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -49,5 +50,29 @@ func TestSharedPlaneStartContextHasDeadline(t *testing.T) {
 
 	if _, err := s.get(); err != nil {
 		t.Fatalf("get(): %v", err)
+	}
+}
+
+func TestSharedPlanePrintsStartupLogsOnce(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("boom")
+	s := &sharedPlane{start: func(context.Context) (*ControlPlane, error) {
+		return nil, &startError{err: boom, logs: "LOG LINE"}
+	}}
+
+	_, first := s.get()
+	_, second := s.get()
+
+	if !errors.Is(first, boom) || !errors.Is(second, boom) {
+		t.Fatalf("get() errors = %v, %v; want both to wrap boom", first, second)
+	}
+
+	if !strings.Contains(first.Error(), "LOG LINE") {
+		t.Errorf("first error %q does not carry the startup logs", first)
+	}
+
+	if strings.Contains(second.Error(), "LOG LINE") {
+		t.Errorf("second error %q repeats the startup logs", second)
 	}
 }

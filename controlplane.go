@@ -47,10 +47,24 @@ func New(ctx context.Context) (*ControlPlane, error) {
 
 	cp, err := start(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("petri: start control plane: %w\n--- recent control plane logs ---\n%s", err, logs)
+		return nil, &startError{err: err, logs: logs.String()}
 	}
 
 	return cp, nil
+}
+
+// startError is a startup failure with the control plane logs leading up to it.
+type startError struct {
+	err  error
+	logs string
+}
+
+func (e *startError) Error() string {
+	return fmt.Sprintf("petri: start control plane: %v\n--- recent control plane logs ---\n%s", e.err, e.logs)
+}
+
+func (e *startError) Unwrap() error {
+	return e.err
 }
 
 // Config returns a new admin (system:masters) client config for the control
@@ -114,7 +128,7 @@ func start(ctx context.Context) (*ControlPlane, error) {
 	cp := &ControlPlane{stopServer: stopServer, stopKine: stopKine, kineWG: &sync.WaitGroup{}}
 
 	if err := cp.boot(ctx, serverCtx, kineCtx); err != nil {
-		return nil, errors.Join(err, cp.Stop())
+		return nil, withStopError(err, cp.Stop())
 	}
 
 	return cp, nil
@@ -199,4 +213,15 @@ func (cp *ControlPlane) waitReady(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// withStopError adds the error Stop returned after a failed boot, unless err
+// already carries it: when kube-apiserver exits during startup, the readiness
+// error wraps the same serve error that Stop returns.
+func withStopError(err, stopErr error) error {
+	if stopErr == nil || errors.Is(err, stopErr) {
+		return err
+	}
+
+	return errors.Join(err, stopErr)
 }

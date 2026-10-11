@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in petri does not work as documented.
+labels: ["bug"]
+body:
+  - type: input
+    id: petri-version
+    attributes:
+      label: petri version
+      placeholder: v0.37.0
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Output of `go version`.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: A minimal test that shows the problem.
+      render: go

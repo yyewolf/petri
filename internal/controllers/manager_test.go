@@ -199,6 +199,33 @@ func TestEnableRetriesAfterAFailedStart(t *testing.T) {
 	}
 }
 
+func TestRegisterCopiesTheSpecs(t *testing.T) {
+	t.Parallel()
+
+	mgr := newTestManager(t)
+
+	var builds atomic.Int64
+
+	// Register is variadic: the registry must hold copies, not pointers into
+	// the caller's backing array, so mutating a spec afterwards cannot change
+	// what Enable runs.
+	specs := []controllers.Spec{countingStub("stub", &builds)}
+
+	if err := mgr.Register(specs...); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	specs[0].Build = nil
+
+	if err := mgr.Enable("stub"); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	if builds.Load() != 1 {
+		t.Errorf("Build ran %d times, want 1 (the registry must keep its own copy)", builds.Load())
+	}
+}
+
 func TestEnableUnknownControllerFails(t *testing.T) {
 	t.Parallel()
 

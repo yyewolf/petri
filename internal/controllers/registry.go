@@ -61,7 +61,11 @@ func (m *Manager) Register(specs ...Spec) error {
 	}
 
 	for i := range specs {
-		m.specs[specs[i].Name] = &specs[i]
+		// Copy each spec into its own pointer: Register is variadic, so
+		// storing &specs[i] would alias the caller's backing array and let a
+		// later mutation silently change the registry.
+		spec := specs[i]
+		m.specs[spec.Name] = &spec
 	}
 
 	return nil

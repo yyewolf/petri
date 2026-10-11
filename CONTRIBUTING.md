@@ -13,6 +13,7 @@ make test   # go test -race ./...
 make lint   # golangci-lint config verify + run
 make fmt    # format with goimports and golines
 make tidy   # go mod tidy
+make mirror # regenerate internal/kubernetes
 ```
 
 `make` with no target lists them.
@@ -25,6 +26,23 @@ make tidy   # go mod tidy
   The patch number increments for any petri change.
 - `KubernetesVersion` in `version.go` must match the release line. The release
   workflow refuses tags that do not match it.
+
+## The Kubernetes mirror
+
+`internal/kubernetes` is upstream kube-apiserver code copied from
+`k8s.io/kubernetes` by `hack/mirror`, with import paths rewritten. Never edit
+it by hand; CI regenerates it and fails on any difference.
+
+- `make mirror` regenerates it at the version in `internal/kubernetes/MIRROR.json`.
+- `make mirror K8S_VERSION=v1.37.2` moves to another release and pins go.mod
+  to the module versions that release uses.
+
+The Mirror workflow runs daily. It opens a PR for each new patch release on
+`main` and every `release-1.N` branch. When a new Kubernetes minor ships, it
+cuts `release-1.N` from `main` and opens a PR moving `main` to the new minor.
+It needs a `MIRROR_TOKEN` secret: a fine-grained personal access token for
+this repository with Contents and Pull requests read/write, because PRs opened
+with the default token do not trigger CI.
 
 ## Pull requests
 

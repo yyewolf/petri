@@ -133,16 +133,16 @@ func TestWaitUntilUnstructuredObjects(t *testing.T) {
 	}
 	res := make(chan result, 1)
 	go func() {
-		obj, err := controllerruntime.WaitUntil(t.Context(), c, widget,
+		obj, waitErr := controllerruntime.WaitUntil(t.Context(), c, widget,
 			func(o *unstructured.Unstructured) (bool, error) { return o != nil, nil })
-		res <- result{obj, err}
+		res <- result{obj: obj, err: waitErr}
 	}()
 
 	time.Sleep(200 * time.Millisecond)
 	// The client fills in the object's apiVersion and kind, so create a copy:
 	// the wait engine reads the template concurrently.
-	if err := c.Create(t.Context(), widget.DeepCopy()); err != nil {
-		t.Fatalf("create widget: %v", err)
+	if createErr := c.Create(t.Context(), widget.DeepCopy()); createErr != nil {
+		t.Fatalf("create widget: %v", createErr)
 	}
 
 	select {

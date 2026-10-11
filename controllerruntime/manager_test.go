@@ -54,7 +54,7 @@ func TestStartManagerSyncsCachesAndRunsControllers(t *testing.T) {
 	c := clientForTest(t, env)
 	ns := env.Namespace(t)
 
-	mgr := controllerruntime.NewManager(t, env)
+	mgr := controllerruntime.NewManager(t, env.Config())
 	seen := make(chan string, 16)
 	if err := builder.ControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).

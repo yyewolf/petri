@@ -81,11 +81,11 @@ func runManagerCycle(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatalf("close probe listener: %v", err)
+	if closeErr := ln.Close(); closeErr != nil {
+		t.Fatalf("close probe listener: %v", closeErr)
 	}
 
-	mgr := controllerruntime.NewManager(t, env, controllerruntime.WithWebhookServer(
+	mgr := controllerruntime.NewManager(t, env.Config(), controllerruntime.WithWebhookServer(
 		webhook.NewServer(webhook.Options{
 			Host:    "127.0.0.1",
 			Port:    port,
@@ -95,10 +95,10 @@ func runManagerCycle(t *testing.T) {
 
 	// Registering the webhook is what makes the Manager actually start its
 	// webhook server.
-	if err := builder.WebhookManagedBy(mgr, &corev1.Pod{}).
+	if hookErr := builder.WebhookManagedBy(mgr, &corev1.Pod{}).
 		WithDefaulter(podDefaulter{}).
-		Complete(); err != nil {
-		t.Fatalf("register webhook: %v", err)
+		Complete(); hookErr != nil {
+		t.Fatalf("register webhook: %v", hookErr)
 	}
 
 	ns, err := env.NewNamespace(ctx)
@@ -115,15 +115,15 @@ func runManagerCycle(t *testing.T) {
 	// chain ran through the controller-runtime webhook server.
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "webhooked", Namespace: ns}}
 	pod.Spec.Containers = []corev1.Container{{Name: "c", Image: "busybox:1.36"}}
-	if err := c.Create(t.Context(), pod); err != nil {
-		t.Fatalf("create pod: %v", err)
+	if createErr := c.Create(t.Context(), pod); createErr != nil {
+		t.Fatalf("create pod: %v", createErr)
 	}
 
 	got := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "webhooked", Namespace: ns}}
 	key := client.ObjectKeyFromObject(got)
 	petri.Retry(t, func(pollCtx context.Context) (bool, error) {
-		if err := c.Get(pollCtx, key, got); err != nil {
-			return false, err
+		if getErr := c.Get(pollCtx, key, got); getErr != nil {
+			return false, getErr
 		}
 
 		return got.Labels["webhooked"] == "yes", nil

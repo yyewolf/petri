@@ -20,8 +20,9 @@ import (
 // reconnects after watch expiry.
 //
 // The client must support watches, as client.New's clients do; the manager's
-// cached client does not. The condition receives nil only for an object that
-// is not there.
+// cached client supports neither, and lags behind creations made just before
+// the wait. The condition receives nil only for an object that is not there,
+// which is what waiting for deletion looks like.
 func WaitUntil[O client.Object](
 	ctx context.Context, c client.Client, obj O, cond func(O) (bool, error), opts ...petri.WaitOption,
 ) (O, error) {

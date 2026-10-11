@@ -8,11 +8,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
-	"github.com/yyewolf/petri"
 )
 
 // managerSyncTimeout bounds the wait for a Manager's caches to sync.
@@ -38,13 +37,13 @@ func WithWebhookServer(s webhook.Server) ManagerOption {
 	return func(o *managerOptions) { o.webhooks = s }
 }
 
-// NewManager returns a manager.Manager for the control plane, with test
-// defaults: the control plane's admin config, metrics and health probes off,
-// and the built-in Kubernetes types registered.
-func NewManager(t testing.TB, cp *petri.ControlPlane, opts ...ManagerOption) manager.Manager {
+// NewManager returns a manager.Manager for the control plane's config, with
+// test defaults: metrics and health probes off, and the built-in Kubernetes
+// types registered.
+func NewManager(t testing.TB, cfg *rest.Config, opts ...ManagerOption) manager.Manager {
 	t.Helper()
 
-	mgr, err := newManager(cp, opts)
+	mgr, err := newManager(cfg, opts)
 	if err != nil {
 		t.Fatalf("petri controllerruntime: build manager: %v", err)
 	}
@@ -52,7 +51,7 @@ func NewManager(t testing.TB, cp *petri.ControlPlane, opts ...ManagerOption) man
 	return mgr
 }
 
-func newManager(cp *petri.ControlPlane, opts []ManagerOption) (manager.Manager, error) {
+func newManager(cfg *rest.Config, opts []ManagerOption) (manager.Manager, error) {
 	options := managerOptions{
 		scheme:   clientgoscheme.Scheme,
 		webhooks: webhook.NewServer(webhook.Options{}),
@@ -63,7 +62,7 @@ func newManager(cp *petri.ControlPlane, opts []ManagerOption) (manager.Manager, 
 
 	// A metrics server per test binary would fight over :8080, and no test
 	// scrapes it.
-	return manager.New(cp.Config(), manager.Options{
+	return manager.New(cfg, manager.Options{
 		Scheme:        options.scheme,
 		Metrics:       server.Options{BindAddress: "0"},
 		WebhookServer: options.webhooks,

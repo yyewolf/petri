@@ -26,6 +26,11 @@ spec:
                 size:
                   type: string
                   default: small
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
 ---
 apiVersion: v1
 kind: ConfigMap

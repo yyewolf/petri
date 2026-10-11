@@ -71,7 +71,7 @@ cd controllerruntime
 "$go_cmd" get "sigs.k8s.io/controller-runtime@$controller_runtime"
 "$go_cmd" get "k8s.io/api@$staging" "k8s.io/apimachinery@$staging" "k8s.io/client-go@$staging"
 
-sed -i "s|github.com/yyewolf/petri v[0-9][0-9.]*|github.com/yyewolf/petri v0.$minor.0|" go.mod
+sed -i "s|github.com/yyewolf/petri v[^ ]*|github.com/yyewolf/petri v0.$minor.0|" go.mod
 if ! grep -q "github.com/yyewolf/petri v0.$minor.0" go.mod; then
 	echo "error: controllerruntime/go.mod does not require github.com/yyewolf/petri" >&2
 	exit 1

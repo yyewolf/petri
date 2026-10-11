@@ -293,6 +293,39 @@ func TestAdmissionWebhooksAreRemovedOnCleanup(t *testing.T) {
 	}
 }
 
+// TestAdmissionWebhooksPartialFailureCleansUp pins the behavior when one of
+// several configurations fails to create: the ones already created must not
+// leak, since a leaked unscoped configuration outlives the dead local server
+// and breaks other tests' matching writes.
+func TestAdmissionWebhooksPartialFailureCleansUp(t *testing.T) {
+	t.Parallel()
+
+	env := petri.Start(t)
+	cs := clientFor(t, env.Config())
+
+	// The second configuration's name is not a DNS subdomain, so the API
+	// server rejects it after the first one was created.
+	broken := mutatingConfig("Bad-Uppercase-Name", "broken.example.com", neverRules())
+
+	cleanup, err := env.InstallAdmissionWebhooksCtx(t.Context(),
+		petri.AdmissionWebhookOptions{Host: "127.0.0.1", Port: 1},
+		mutatingConfig("partial-failure", "partial-failure.example.com", neverRules()),
+		broken,
+	)
+	if err == nil {
+		_ = cleanup()
+		t.Fatal("installing a configuration with an invalid name succeeded, want an error")
+	}
+
+	list, lerr := webhookConfigs(t, cs, "mutating")
+	if lerr != nil {
+		t.Fatalf("list configurations: %v", lerr)
+	}
+	if hasNamePrefix(list, "partial-failure-") {
+		t.Errorf("configurations created before the failure leaked: %v", list)
+	}
+}
+
 func TestAdmissionWebhooksParallelInstallSameManifest(t *testing.T) {
 	t.Parallel()
 

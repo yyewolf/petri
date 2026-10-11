@@ -148,7 +148,10 @@ func (cp *ControlPlane) InstallAdmissionWebhooksCtx(
 
 			return createErr
 		}); createErr != nil {
-			return nil, createErr
+			// Do not leak the configurations created before the failure: on
+			// the shared plane they would outlive the dead local server and
+			// break other tests' matching writes.
+			return nil, errors.Join(createErr, removeAdmissionConfigs(cp, created))
 		}
 
 		created = append(created, installedConfig{mutating: true, name: config.Name})
@@ -162,7 +165,7 @@ func (cp *ControlPlane) InstallAdmissionWebhooksCtx(
 
 			return createErr
 		}); createErr != nil {
-			return nil, createErr
+			return nil, errors.Join(createErr, removeAdmissionConfigs(cp, created))
 		}
 
 		created = append(created, installedConfig{mutating: false, name: config.Name})
@@ -268,27 +271,40 @@ func admissionCleanup(cp *ControlPlane, created []installedConfig) func() error 
 		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
 
-		client := cp.Client()
-		background := metav1.DeletePropagationBackground
+		return removeAdmissionConfigsWithCtx(ctx, cp, created)
+	}
+}
 
-		var errs []error
-		for _, config := range created {
-			var err error
-			if config.mutating {
-				err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().
-					Delete(ctx, config.name, metav1.DeleteOptions{PropagationPolicy: &background})
-			} else {
-				err = client.AdmissionregistrationV1().ValidatingWebhookConfigurations().
-					Delete(ctx, config.name, metav1.DeleteOptions{PropagationPolicy: &background})
-			}
+// removeAdmissionConfigs deletes the created configurations with a fresh
+// cleanup-time context.
+func removeAdmissionConfigs(cp *ControlPlane, created []installedConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
 
-			if err != nil && !apierrors.IsNotFound(err) {
-				errs = append(errs, fmt.Errorf("petri: delete webhook configuration %s: %w", config.name, err))
-			}
+	return removeAdmissionConfigsWithCtx(ctx, cp, created)
+}
+
+func removeAdmissionConfigsWithCtx(ctx context.Context, cp *ControlPlane, created []installedConfig) error {
+	client := cp.Client()
+	background := metav1.DeletePropagationBackground
+
+	var errs []error
+	for _, config := range created {
+		var err error
+		if config.mutating {
+			err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().
+				Delete(ctx, config.name, metav1.DeleteOptions{PropagationPolicy: &background})
+		} else {
+			err = client.AdmissionregistrationV1().ValidatingWebhookConfigurations().
+				Delete(ctx, config.name, metav1.DeleteOptions{PropagationPolicy: &background})
 		}
 
-		return errors.Join(errs...)
+		if err != nil && !apierrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("petri: delete webhook configuration %s: %w", config.name, err))
+		}
 	}
+
+	return errors.Join(errs...)
 }
 
 // ConversionWebhookOptions configures InstallConversionWebhooks.

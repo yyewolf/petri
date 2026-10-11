@@ -2,8 +2,8 @@ package controllerruntime_test
 
 import (
 	"context"
+	"sync"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,15 +36,32 @@ func createConfigMap(t *testing.T, c client.Client, ns, name string) {
 	}
 }
 
-// recordReconciler forwards every reconciled object's name.
+// recordReconciler records every reconciled object's name without ever
+// blocking a controller worker: a blocking Reconcile would stall the manager's
+// graceful shutdown for as long as controller-runtime waits for its workers.
 type recordReconciler struct {
-	seen chan<- string
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func newRecordReconciler() *recordReconciler {
+	return &recordReconciler{seen: map[string]bool{}}
 }
 
 func (r *recordReconciler) Reconcile(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
-	r.seen <- req.Name
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.seen[req.Name] = true
 
 	return reconcile.Result{}, nil
+}
+
+func (r *recordReconciler) saw(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.seen[name]
 }
 
 func TestStartManagerSyncsCachesAndRunsControllers(t *testing.T) {
@@ -55,28 +72,21 @@ func TestStartManagerSyncsCachesAndRunsControllers(t *testing.T) {
 	ns := env.Namespace(t)
 
 	mgr := controllerruntime.NewManager(t, env.Config())
-	seen := make(chan string, 16)
+	reconciler := newRecordReconciler()
 	if err := builder.ControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
-		Complete(&recordReconciler{seen: seen}); err != nil {
+		Complete(reconciler); err != nil {
 		t.Fatalf("build controller: %v", err)
 	}
 
 	// StartManager returns once the caches have synced, so the controller
 	// sees objects created right after it. Parallel tests reconcile their
-	// own configmaps too, so drain until the right one shows up.
+	// own configmaps too, which the recorder tolerates.
 	controllerruntime.StartManager(t, mgr)
 
 	createConfigMap(t, c, ns, "observed")
 
-	for {
-		select {
-		case name := <-seen:
-			if name == "observed" {
-				return
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatal("the controller never reconciled the configmap; caches did not sync")
-		}
-	}
+	petri.Retry(t, func(_ context.Context) (bool, error) {
+		return reconciler.saw("observed"), nil
+	})
 }

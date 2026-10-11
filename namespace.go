@@ -1,8 +1,16 @@
 package petri
 
 import (
+	"context"
 	"math/rand/v2"
 	"strings"
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -54,4 +62,39 @@ func randomSuffix() string {
 	}
 
 	return string(b)
+}
+
+const namespaceCleanupTimeout = 30 * time.Second
+
+// Namespace creates a namespace named after the test plus a random suffix and
+// deletes it when the test finishes. Until petri runs the namespace
+// controller, a deleted namespace stays Terminating with its contents.
+func (cp *ControlPlane) Namespace(t testing.TB) string {
+	t.Helper()
+
+	client, err := kubernetes.NewForConfig(cp.Config())
+	if err != nil {
+		t.Fatalf("petri: namespace client: %v", err)
+	}
+
+	name := namespaceName(t.Name(), randomSuffix())
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+
+	if _, err = client.CoreV1().Namespaces().Create(t.Context(), ns, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("petri: create namespace %q: %v", name, err)
+	}
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), namespaceCleanupTimeout)
+		defer cancel()
+
+		background := metav1.DeletePropagationBackground
+
+		delErr := client.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &background})
+		if delErr != nil && !apierrors.IsNotFound(delErr) && !cp.stoppedAlready() {
+			t.Errorf("petri: delete namespace %q: %v", name, delErr)
+		}
+	})
+
+	return name
 }

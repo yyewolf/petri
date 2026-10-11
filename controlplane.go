@@ -81,6 +81,10 @@ func (cp *ControlPlane) Stop() error {
 	return cp.stopErr
 }
 
+func (cp *ControlPlane) stoppedAlready() bool {
+	return cp.stopped.Load()
+}
+
 func start(ctx context.Context) (*ControlPlane, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("before startup: %w", err)

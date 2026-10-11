@@ -26,12 +26,15 @@ jobs:
           go-version-file: go.mod
 
       - name: Go tests
-        run: go test -race -timeout 20m ./...
+        run: |
+          go test -race -timeout 20m ./...
+          (cd controllerruntime && go test -race -timeout 20m ./...)
 
       - name: Script tests
         if: runner.os == 'Linux'
         run: |
           .github/scripts/check-release-tag_test.sh
+          .github/scripts/bump-submodule_test.sh
           .github/scripts/mirror-pr_test.sh
 
   lint:
@@ -46,6 +49,29 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14
+          working-directory: controllerruntime
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Every platform the mirror's file set is computed for, plus this one.
+      - name: Cross-build
+        run: |
+          for platform in linux/amd64 darwin/amd64 darwin/arm64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "$platform"
+            GOOS=${platform%/*} GOARCH=${platform#*/} go build ./...
+            (cd controllerruntime && GOOS=${platform%/*} GOARCH=${platform#*/} go build ./...)
+          done
 
   mirror-drift:
     runs-on: ubuntu-latest
@@ -67,14 +93,3 @@ jobs:
             echo "::error::internal/kubernetes or go.mod differs from 'make mirror' output. Never edit the mirror by hand; run 'make mirror' and commit the result."
             exit 1
           fi
-
-      - name: Build without cgo
-        run: CGO_ENABLED=0 go build ./...
-
-      # Every platform the mirror's file set is computed for, besides this one.
-      - name: Cross-build
-        run: |
-          for platform in darwin/amd64 darwin/arm64 linux/arm64 windows/amd64 windows/arm64; do
-            echo "$platform"
-            GOOS=${platform%/*} GOARCH=${platform#*/} go build ./...
-          done

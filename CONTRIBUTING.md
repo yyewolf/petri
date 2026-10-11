@@ -9,14 +9,24 @@
 ## Common tasks
 
 ```sh
-make test   # go test -race ./...
-make lint   # golangci-lint config verify + run
+make test   # go test -race ./..., for both modules
+make lint   # golangci-lint config verify + run, for both modules
 make fmt    # format with goimports and golines
-make tidy   # go mod tidy
+make tidy   # go mod tidy, for both modules
 make mirror # regenerate internal/kubernetes
 ```
 
 `make` with no target lists them.
+
+## The Go workspace
+
+The repository root carries a committed `go.work` listing both modules, so the
+`controllerruntime` sub-module builds against the working tree instead of a
+published petri version. It also replaces the final pre-split
+`google.golang.org/genproto` with an empty stand-in: nothing imports its
+packages any more, but cockroachdb/errors still requires it, and the workspace
+build list does not prune it away like a plain module build does. Builds
+without the workspace are unaffected.
 
 ## Branches and versions
 
@@ -24,8 +34,25 @@ make mirror # regenerate internal/kubernetes
 - `release-1.N` branches carry fixes for older minors.
 - Tags are `v0.<k8s minor>.<patch>`, for example `v0.37.2` for Kubernetes 1.37.
   The patch number increments for any petri change.
+- The `controllerruntime` sub-module is tagged `controllerruntime/v0.<k8s
+  minor>.<patch>` together with each petri tag, and its go.mod requires the
+  matching petri tag.
 - `KubernetesVersion` in `version.go` must match the release line. The release
-  workflow refuses tags that do not match it.
+  workflow refuses tags that do not match it; for `controllerruntime/` tags it
+  checks the go.mod requirement instead.
+
+## Releasing
+
+1. Make sure `controllerruntime/go.mod` requires the petri version being
+   released, and that `make test` and `make lint` pass for both modules.
+2. Push both tags together:
+
+   ```sh
+   git tag v0.37.2 && git tag controllerruntime/v0.37.2
+   git push origin v0.37.2 controllerruntime/v0.37.2
+   ```
+
+The release workflow drafts a GitHub release for each tag.
 
 ## The Kubernetes mirror
 
@@ -39,7 +66,10 @@ it by hand; CI regenerates it and fails on any difference.
 
 The Mirror workflow runs daily. It opens a PR for each new patch release on
 `main` and every `release-1.N` branch. When a new Kubernetes minor ships, it
-cuts `release-1.N` from `main` and opens a PR moving `main` to the new minor.
+cuts `release-1.N` from `main` and opens a PR moving `main` to the new minor;
+the PR also bumps the `controllerruntime` sub-module's k8s.io and
+controller-runtime requirements when a matching controller-runtime is out, and
+opens as a draft with a note when it is not.
 Each target branch has at most one mirror PR, from `mirror/<branch>`: a newer
 release updates it in place, and runs that would push identical content do
 not push. A PR closed without merging comes back only once the release or its

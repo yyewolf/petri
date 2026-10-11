@@ -30,8 +30,9 @@ fail() {
 	failures=$((failures + 1))
 }
 
-# run <version> <content> <mirror outcome> <test outcome> <open pr>: regenerate
-# in a fresh clone of main and run the script; sets $status.
+# run <version> <content> <mirror outcome> <test outcome> <open pr> [kind]
+# [submodule outcome]: regenerate in a fresh clone of main and run the script;
+# sets $status.
 run() {
 	local version="$1" content="$2" mirror="$3" tests="$4"
 	printf '%s' "$5" >"$tmp/open_pr"
@@ -43,8 +44,8 @@ run() {
 	runs=$((runs + 1))
 	export GIT_AUTHOR_DATE="@$((1700000000 + runs)) +0000" GIT_COMMITTER_DATE="@$((1700000000 + runs)) +0000"
 	status=0
-	(cd "$tmp/work" && BRANCH=main VERSION="$version" KIND=patch MIRROR_OUTCOME="$mirror" \
-		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" "$script") \
+	(cd "$tmp/work" && BRANCH=main VERSION="$version" KIND="${6:-patch}" MIRROR_OUTCOME="$mirror" \
+		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" SUBMODULE_OUTCOME="${7:-}" "$script") \
 		>"$tmp/out.log" 2>&1 || status=$?
 }
 remote_head() { git -C "$tmp/remote.git" rev-parse --verify -q refs/heads/mirror/main || true; }
@@ -93,6 +94,30 @@ case="no regenerated changes fails"
 run v1.37.5 "" success success ""
 [[ $status != 0 ]] || fail "exited 0"
 logged "pr " && fail "called gh"
+
+case="minor update with a bumped sub-module says so and stays ready"
+run v1.38.0 v1.38.0 success success "" minor success
+[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
+logged "pr create --base main --head mirror/main --title build: mirror Kubernetes v1.38.0" || fail "no pr create"
+logged "--draft" && fail "opened as draft"
+grep -qF "controllerruntime sub-module was bumped" "$tmp/gh.log" || fail "body does not report the sub-module bump"
+
+case="minor update without a controller-runtime release opens a draft and asks for a human"
+run v1.38.1 v1.38.1 success success "8 false" minor none
+[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
+logged "pr ready 8 --undo" || fail "PR not moved to draft"
+grep -qF "controller-runtime for this minor is not released" "$tmp/gh.log" || fail "body does not report the missing release"
+
+case="minor update with a skipped or failed bump notes it"
+run v1.38.2 v1.38.2 success success "" minor skipped
+grep -qF "could not be bumped" "$tmp/gh.log" || fail "body does not report the skipped bump"
+logged "pr ready" && fail "changed draft state for a broken PR"
+run v1.38.2 v1.38.2 success success "9 false" minor failed
+logged "pr ready 9 --undo" || fail "failed bump did not open as draft"
+
+case="patch update does not mention the sub-module"
+run v1.37.6 v1.37.6 success success "" patch success
+grep -qF "controllerruntime" "$tmp/gh.log" && fail "body mentions the sub-module on a patch"
 
 if ((failures > 0)); then
 	echo "$failures check(s) failed"

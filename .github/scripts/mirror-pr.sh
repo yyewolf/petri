@@ -3,14 +3,16 @@
 # target branch. Run from the repository root after `make mirror`.
 #
 # Environment:
-#   BRANCH          target branch (main or release-1.N)
-#   VERSION         Kubernetes version mirrored, such as v1.37.2
-#   KIND            patch or minor
-#   MIRROR_OUTCOME  outcome of `make mirror`
-#   TEST_OUTCOME    outcome of the tests; empty when they were skipped
-#   REMOTE          URL to push to
-#   RUN_URL         link to the workflow run (optional)
-#   GH              gh binary to use (optional; tests stub it)
+#   BRANCH           target branch (main or release-1.N)
+#   VERSION          Kubernetes version mirrored, such as v1.37.2
+#   KIND             patch or minor
+#   MIRROR_OUTCOME   outcome of `make mirror`
+#   TEST_OUTCOME     outcome of the tests; empty when they were skipped
+#   SUBMODULE_OUTCOME outcome of the controllerruntime bump on a minor move:
+#                    success, none (no controller-runtime release yet), skipped
+#   REMOTE           URL to push to
+#   RUN_URL          link to the workflow run (optional)
+#   GH               gh binary to use (optional; tests stub it)
 set -euo pipefail
 
 : "${BRANCH:?}" "${VERSION:?}" "${KIND:?}" "${MIRROR_OUTCOME:?}" "${REMOTE:?}"
@@ -46,6 +48,24 @@ if [[ "$KIND" == minor ]]; then
 	body="$body
 
 This moves \`$BRANCH\` to a new Kubernetes minor. The previous minor continues on its \`release-1.N\` branch. Check whether the Go version or kine also need a bump."
+
+	case "${SUBMODULE_OUTCOME:-}" in
+	success)
+		body="$body
+
+The controllerruntime sub-module was bumped to the new minor."
+		;;
+	none)
+		body="$body
+
+controller-runtime for this minor is not released yet, so the controllerruntime sub-module still needs its k8s.io and controller-runtime requirements bumped once it ships."
+		;;
+	skipped|failed)
+		body="$body
+
+The controllerruntime sub-module could not be bumped; its k8s.io and controller-runtime requirements still match the previous minor."
+		;;
+	esac
 fi
 
 broken=false
@@ -54,6 +74,11 @@ if [[ "$MIRROR_OUTCOME" != success || "${TEST_OUTCOME:-}" != success ]]; then
 	body="$body
 
 **Needs a human:** \`make mirror\` finished with \`$MIRROR_OUTCOME\` and \`go test -race ./...\` with \`${TEST_OUTCOME:-skipped}\`${RUN_URL:+ in [this run]($RUN_URL)}."
+elif [[ "$KIND" == minor && "${SUBMODULE_OUTCOME:-}" != success && "${SUBMODULE_OUTCOME:-}" != "" ]]; then
+	broken=true
+	body="$body
+
+**Needs a human:** the controllerruntime sub-module bump did not complete (outcome: ${SUBMODULE_OUTCOME:-skipped})${RUN_URL:+, see [this run]($RUN_URL)}."
 fi
 
 read -r number is_draft < <("$gh" pr list --head "$head" --base "$BRANCH" --state open \

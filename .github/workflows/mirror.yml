@@ -89,11 +89,27 @@ jobs:
         continue-on-error: true
         run: make mirror K8S_VERSION="$VERSION"
 
+      - name: Bump the controllerruntime sub-module
+        id: submodule
+        if: matrix.kind == 'minor' && steps.mirror.outcome == 'success'
+        continue-on-error: true
+        run: |
+          if .github/scripts/bump-submodule.sh "$VERSION"; then
+            echo "outcome=success" >>"$GITHUB_OUTPUT"
+          elif [[ $? == 2 ]]; then
+            echo "outcome=none" >>"$GITHUB_OUTPUT"
+          else
+            echo "outcome=failed" >>"$GITHUB_OUTPUT"
+            exit 1
+          fi
+
       - name: Test
         id: test
         if: steps.mirror.outcome == 'success'
         continue-on-error: true
-        run: go test -race ./...
+        run: |
+          go test -race -timeout 20m ./...
+          (cd controllerruntime && go test -race -timeout 20m ./...)
 
       - name: Open or update the pull request
         env:
@@ -101,6 +117,7 @@ jobs:
           REMOTE: https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/${{ github.repository }}.git
           MIRROR_OUTCOME: ${{ steps.mirror.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
+          SUBMODULE_OUTCOME: ${{ steps.submodule.outputs.outcome || (matrix.kind == 'minor' && 'skipped' || '') }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: .github/scripts/mirror-pr.sh
 

@@ -1,0 +1,14 @@
+go 1.26.5
+
+use (
+	.
+	./controllerruntime
+)
+
+// The workspace build would otherwise see two modules providing the
+// googleapis packages: the post-split modules and the final pre-split
+// google.golang.org/genproto, which cockroachdb/errors still requires and
+// which has no newer release. Nothing imports the pre-split packages, so the
+// workspace replaces the old module with an empty stand-in. Builds without the
+// workspace prune it and are unaffected.
+replace google.golang.org/genproto => ./hack/genproto-stub

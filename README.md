@@ -55,6 +55,14 @@ your `client-go` minor. Testing a client against an older or newer API server
 (version-skew testing) is out of scope. envtest can do that because its
 binaries are separate from your code.
 
+## Design constraints
+
+petri will never require you to import `k8s.io/kubernetes`. That module pins
+its staging modules (`k8s.io/api`, `k8s.io/apiserver`, and others) at `v0.0.0`
+and resolves them with `replace` directives, which Go ignores in dependencies.
+Importing it would force every user to copy those directives into their own
+go.mod, so petri only depends on modules that resolve without them.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

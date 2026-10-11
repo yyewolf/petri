@@ -1,0 +1,110 @@
+name: Mirror
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - id: plan
+        name: Plan updates
+        run: |
+          matrix=$(go run ./hack/mirror plan)
+          echo "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
+
+  update:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      BRANCH: ${{ matrix.branch }}
+      VERSION: ${{ matrix.version }}
+      KIND: ${{ matrix.kind }}
+    steps:
+      - name: Require MIRROR_TOKEN
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+        run: |
+          if [[ -z "$MIRROR_TOKEN" ]]; then
+            echo "::error::Set the MIRROR_TOKEN secret: a fine-grained personal access token for this repository with Contents and Pull requests read/write. PRs opened with GITHUB_TOKEN do not trigger CI."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.MIRROR_TOKEN }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Cut the release branch for the outgoing minor
+        if: matrix.kind == 'minor'
+        run: |
+          minor=$(sed -n 's/^const KubernetesVersion = "\(.*\)"$/\1/p' version.go)
+          release="release-$minor"
+          if git ls-remote --exit-code --heads origin "$release" >/dev/null; then
+            echo "$release already exists"
+          else
+            git push origin "HEAD:refs/heads/$release"
+          fi
+
+      - name: Regenerate the mirror
+        run: make mirror K8S_VERSION="$VERSION"
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+        run: |
+          head="mirror/$VERSION"
+          git config user.name "petri-mirror"
+          git config user.email "petri-mirror@users.noreply.github.com"
+          git switch -c "$head"
+          git add -A
+          git commit -m "build: mirror Kubernetes $VERSION"
+          git push --force origin "$head"
+
+          body="Regenerated with \`make mirror K8S_VERSION=$VERSION\` by the Mirror workflow."
+          if [[ "$KIND" == minor ]]; then
+            body="$body
+
+          This moves \`$BRANCH\` to a new Kubernetes minor. The previous minor continues on its \`release-1.N\` branch. Check whether the Go version or kine also need a bump."
+          fi
+
+          state=$(gh pr view "$head" --json state --jq .state 2>/dev/null || true)
+          if [[ "$state" == OPEN ]]; then
+            echo "PR for $head is already open; branch updated."
+          else
+            gh pr create --base "$BRANCH" --head "$head" --title "build: mirror Kubernetes $VERSION" --body "$body"
+          fi

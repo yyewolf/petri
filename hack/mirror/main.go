@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-const usage = "usage: mirror sync [-repo DIR] [-version v1.N.P]"
+const usage = "usage: mirror sync [-repo DIR] [-version v1.N.P] | mirror plan [-repo DIR] [-remote NAME]"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
@@ -18,7 +18,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, _ io.Writer) error {
+func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -34,6 +34,13 @@ func run(ctx context.Context, args []string, _ io.Writer) error {
 		}
 
 		return runSync(ctx, *repo, *ver)
+	case "plan":
+		remote := flags.String("remote", "origin", "git remote that holds the release branches")
+		if err := flags.Parse(args[1:]); err != nil {
+			return fmt.Errorf("parse flags: %w", err)
+		}
+
+		return runPlan(ctx, *repo, *remote, stdout)
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}

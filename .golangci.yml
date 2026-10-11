@@ -457,9 +457,9 @@ linters:
     # Excluding configuration per-path, per-linter, per-text and per-source.
     rules:
     # hack/ is a developer tool: it writes world-readable source files inside this repository,
-    # reads the module cache, and runs the go command, so these gosec findings do not apply.
+    # reads the module cache and GOPROXY, and runs go and git, so these gosec findings do not apply.
     - path: ^hack/
-      text: G301|G306|G702|G703
+      text: G301|G306|G702|G703|G704
       linters: [ gosec ]
     - source: 'TODO'
       linters: [ godot ]

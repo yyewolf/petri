@@ -1,0 +1,17 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gocritic
+    - misspell
+    - revive
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/yyewolf/petri

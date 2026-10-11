@@ -40,6 +40,11 @@ it by hand; CI regenerates it and fails on any difference.
 The Mirror workflow runs daily. It opens a PR for each new patch release on
 `main` and every `release-1.N` branch. When a new Kubernetes minor ships, it
 cuts `release-1.N` from `main` and opens a PR moving `main` to the new minor.
+Each target branch has at most one mirror PR, from `mirror/<branch>`: a newer
+release updates it in place, and runs that would push identical content do
+not push. A PR closed without merging comes back only once the release or its
+target branch changes. Updates that fail `make mirror` or the tests open
+as drafts.
 It needs a `MIRROR_TOKEN` secret: a fine-grained personal access token for
 this repository with Contents and Pull requests read/write, because PRs opened
 with the default token do not trigger CI.

@@ -97,46 +97,12 @@ jobs:
 
       - name: Open or update the pull request
         env:
-          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
           GH_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          REMOTE: https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/${{ github.repository }}.git
           MIRROR_OUTCOME: ${{ steps.mirror.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
-        run: |
-          if [[ -z "$(git status --porcelain)" ]]; then
-            echo "::error::make mirror K8S_VERSION=$VERSION changed nothing; see the 'Regenerate the mirror' step."
-            exit 1
-          fi
-
-          head="mirror/$VERSION"
-          remote="https://x-access-token:${MIRROR_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git config user.name "petri-mirror"
-          git config user.email "petri-mirror@users.noreply.github.com"
-          git switch -c "$head"
-          git add -A
-          git commit -m "build: mirror Kubernetes $VERSION"
-          git push --force "$remote" "$head"
-
-          body="Regenerated with \`make mirror K8S_VERSION=$VERSION\` by the Mirror workflow."
-          if [[ "$KIND" == minor ]]; then
-            body="$body
-
-          This moves \`$BRANCH\` to a new Kubernetes minor. The previous minor continues on its \`release-1.N\` branch. Check whether the Go version or kine also need a bump."
-          fi
-
-          draft=()
-          if [[ "$MIRROR_OUTCOME" != success || "$TEST_OUTCOME" != success ]]; then
-            draft=(--draft)
-            body="$body
-
-          **Needs a human:** \`make mirror\` finished with \`$MIRROR_OUTCOME\` and \`go test -race ./...\` with \`${TEST_OUTCOME:-skipped}\` in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
-          fi
-
-          state=$(gh pr view "$head" --json state --jq .state 2>/dev/null || true)
-          if [[ "$state" == OPEN ]]; then
-            echo "PR for $head is already open; branch updated."
-          else
-            gh pr create --base "$BRANCH" --head "$head" --title "build: mirror Kubernetes $VERSION" --body "$body" "${draft[@]}"
-          fi
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/mirror-pr.sh
 
       - name: Fail the run when the update is broken
         if: steps.mirror.outcome != 'success' || steps.test.outcome != 'success'

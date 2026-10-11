@@ -28,9 +28,11 @@ jobs:
       - name: Go tests
         run: go test -race -timeout 20m ./...
 
-      - name: Release tag guard tests
+      - name: Script tests
         if: runner.os == 'Linux'
-        run: .github/scripts/check-release-tag_test.sh
+        run: |
+          .github/scripts/check-release-tag_test.sh
+          .github/scripts/mirror-pr_test.sh
 
   lint:
     runs-on: ubuntu-latest

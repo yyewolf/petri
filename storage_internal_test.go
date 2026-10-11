@@ -3,6 +3,7 @@ package petri
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/k3s-io/kine/pkg/server"
 )
@@ -46,4 +47,26 @@ func TestClippedBackendClipsWatchBatches(t *testing.T) {
 	if _, open := <-res.Eventc; open {
 		t.Error("event channel still open after the source closed")
 	}
+}
+
+func TestClippedBackendDrainsSourceAfterCancel(t *testing.T) {
+	t.Parallel()
+
+	src := make(chan server.EventBatch) // unbuffered: every send needs a reader
+	ctx, cancel := context.WithCancel(t.Context())
+
+	clippedBackend{fakeWatchBackend{events: src}}.Watch(ctx, 0)
+	cancel()
+
+	// kine's memory driver keeps sending until it closes the channel; the
+	// wrapper must keep reading or that goroutine blocks forever.
+	for i := range 3 {
+		select {
+		case src <- server.EventBatch{CurrentRev: int64(i)}:
+		case <-time.After(time.Second):
+			t.Fatalf("send %d blocked: the wrapper stopped draining kine's channel after cancel", i)
+		}
+	}
+
+	close(src)
 }

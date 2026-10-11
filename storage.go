@@ -63,6 +63,10 @@ func (b clippedBackend) Watch(ctx context.Context, revision int64) server.WatchR
 			select {
 			case out <- batch:
 			case <-ctx.Done():
+				// Keep reading until kine closes the channel, or its sender blocks forever.
+				for range src {
+				}
+
 				return
 			}
 		}

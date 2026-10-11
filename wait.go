@@ -129,7 +129,7 @@ func waitUntil[O runtime.Object](
 	var last O
 
 	for {
-		obj, err := getOne(ctx, client, name)
+		obj, err := getOne(ctx, client, name, last)
 		if err != nil {
 			return last, err
 		}
@@ -246,7 +246,7 @@ func followWatch[O runtime.Object](
 func confirmStart[O runtime.Object](
 	ctx context.Context, client ObjectClient[O], name string, cond Condition[O], last O,
 ) (O, bool, error) {
-	obj, err := getOne(ctx, client, name)
+	obj, err := getOne(ctx, client, name, last)
 	if err != nil {
 		return last, false, err
 	}
@@ -307,14 +307,21 @@ func applyWatchEvent[O runtime.Object](
 }
 
 // getOne reads the object, turning NotFound into a nil result so conditions
-// can wait for it to appear or disappear.
-func getOne[O runtime.Object](ctx context.Context, client ObjectClient[O], name string) (O, error) {
+// can wait for it to appear or disappear. When the wait's deadline ends the
+// get, the timeout error is reported with the last observed object instead.
+func getOne[O runtime.Object](
+	ctx context.Context, client ObjectClient[O], name string, last O,
+) (O, error) {
 	var zero O
 
 	obj, err := client.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return zero, nil
+		}
+
+		if ctx.Err() != nil {
+			return last, timeoutError(ctx, name, last)
 		}
 
 		return zero, fmt.Errorf("petri: get %q: %w", name, err)

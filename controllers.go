@@ -93,7 +93,10 @@ func WorkloadControllers() []Controller {
 // parallel tests can enable the same controllers without racing, and on the
 // shared control plane controllers stay enabled once enabled, the same model
 // as InstallCRDs. A plane started with [WithoutDefaultControllers] can enable
-// them too.
+// them too. The opt-out is for tests that want strict envtest semantics, and
+// it is final: such a plane never registers the namespace controller or the
+// garbage collector, and no exported [Controller] names them, so they cannot
+// be enabled afterwards.
 //
 // Enabling a controller never enables another: Deployment without ReplicaSet
 // creates ReplicaSets but no Pods. With no controllers named,

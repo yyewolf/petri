@@ -66,7 +66,9 @@ type Option func(*startOptions)
 // deleting an owner leaves its dependents behind: the semantics of envtest,
 // which runs no controllers. Use it for tests that rely on envtest behaviour;
 // with the defaults, a deleted namespace really goes away and ownerReferences
-// cascade.
+// cascade. The opt-out is final: the plane never registers the two
+// controllers, and no exported [Controller] names them, so
+// [ControlPlane.EnableControllers] cannot enable them afterwards.
 //
 // The shared control plane (Start) always runs the defaults; the envtest
 // drop-in runs them too, unless its environment opts out.

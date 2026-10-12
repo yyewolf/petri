@@ -78,8 +78,10 @@ func (m *Manager) Register(specs ...Spec) error {
 // Calls coalesce: while a controller is starting or running, later Enable
 // calls neither build a second copy nor disturb the first one. They wait for
 // the start in flight, or return at once for a running controller. A start
-// that failed is forgotten, so a later call retries it from scratch. Enable
-// after Stop fails: the manager starts nothing it would not wait for.
+// that failed is forgotten, so a later call retries it from scratch. A
+// controller whose Run has exited is not restarted: the start record is kept,
+// so a later Enable still reports success. Enable after Stop fails: the
+// manager starts nothing it would not wait for.
 func (m *Manager) Enable(name string) error {
 	m.mu.Lock()
 	spec, ok := m.specs[name]

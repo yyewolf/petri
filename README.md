@@ -3,8 +3,8 @@
 Real Kubernetes control plane for `go test`. No binaries, no Docker.
 
 > [!WARNING]
-> petri is pre-alpha. The API server and the built-in controllers work; fake
-> kubelets are not implemented yet, and the API will change.
+> petri is pre-alpha. The API server, the built-in controllers, kube-scheduler
+> and simulated Nodes work; the API will change.
 
 ## Why
 
@@ -22,7 +22,8 @@ over an in-memory store, so `go test ./...` works on a fresh checkout and
 nothing is written to disk unless a test asks for a webhook serving
 certificate, which is the only disk use. It runs upstream built-in controllers
 too: the namespace controller and the garbage collector by default, twelve
-more on demand. A scheduler and fake kubelets are planned next.
+more on demand, and kube-scheduler over simulated Nodes, so Pods actually
+run.
 
 ## Usage
 
@@ -125,6 +126,72 @@ Ready-made conditions are `Exists`, `Deleted` and `StatusCondition`, which
 reads `status.conditions[type]` for any condition shape with string type and
 status fields, including objects fetched through the dynamic client. Anything
 else is a condition function away.
+
+### Nodes and scheduling
+
+A dedicated control plane can have Nodes, simulated as kwok does: no
+containers run, but Pods placed on a Node go `Running` and `Ready` at once,
+with an IP from the Node's PodCIDR, and deleted Pods go away at once.
+
+```go
+cp, _ := petri.New(ctx)
+gpu := cp.AddNode(t, petri.NodeOptions{
+	Name:   "gpu-a",
+	Labels: map[string]string{"pool": "gpu"},
+	Taints: []corev1.Taint{{Key: "gpu", Effect: corev1.TaintEffectNoSchedule}},
+})
+```
+
+`NodeOptions` also sets capacity (32 CPUs, 256Gi and 110 Pods by default) and
+can create the Node cordoned. The Node is deleted when the test finishes, and
+its handle changes it the way an operator or a failing kubelet would:
+`Taint`, `Untaint`, `Cordon`, `Uncordon`, `Drain` (evictions through the
+Eviction API, retried while a PodDisruptionBudget refuses them), `Delete`
+and `SetReady`. A Node set not Ready gets the not-ready taint and its
+kubelet freezes: bound Pods stay Pending and deleted Pods stay `Terminating`
+until it is Ready again. Nothing is evicted automatically: petri runs no
+node lifecycle or taint-eviction controller.
+
+Pods get onto Nodes one of two ways, chosen per control plane.
+
+**kube-scheduler.** Enable `petri.SchedulerController` and upstream
+kube-scheduler places Pods by requests, taints and tolerations, node
+selectors, affinities and topology spread, as on a cluster:
+
+```go
+cp.EnableControllers(t, petri.SchedulerController, petri.DeploymentController, petri.ReplicaSetController)
+// a Deployment created now becomes Available
+```
+
+**By hand, like a mock.** Without the scheduler, Pods stay Pending until the
+test places them. `ExpectPod` waits for a Pending Pod and hands it over once;
+`Bind` places it through the same `pods/binding` call the scheduler makes:
+
+```go
+pod := cp.ExpectPod(t, petri.InNamespace(ns), petri.Labeled("app", "web"))
+cp.Bind(t, pod, gpu)
+```
+
+Declarative expectations claim Pods as they arrive, gomock-style, and fail
+the test when it finishes if they claimed too few; `StrictPods` also fails
+it for every Pod nobody expected:
+
+```go
+cp.ExpectPods(t, petri.OwnedBy(rs)).Times(3).BindTo(gpu).Wait(t)
+cp.StrictPods(t)
+```
+
+Matchers are `InNamespace`, `Labeled`, `OwnedBy` and `PodMatching` for
+anything else. Expectations claim Pods before `ExpectPod` does, in the order
+they were registered. Mixing the two ways on one plane fails the test.
+
+Whoever placed it, a running Pod is the test's to drive: `CompletePod` and
+`FailPod` finish it (that is how Jobs complete), `SetPodReady` flips its
+readiness, and `Evict` goes through the Eviction API, so PodDisruptionBudgets
+apply. The simulator never overrides what the test set.
+
+Nodes belong to the whole cluster, so the shared control plane refuses all
+of this: use `petri.New`.
 
 ### CRDs
 
@@ -280,15 +347,21 @@ minor a build targets.
   equals your `client-go` minor. Testing a client against an older or newer
   API server (version-skew testing) is out of scope. envtest can do that
   because its binaries are separate from your code.
-- Built-in controllers run, but there is no scheduler and no kubelet, so Pods
-  stay `Pending`. The workload controllers stop where node state would be
-  needed: Jobs never finish, StatefulSets with the default `OrderedReady`
-  policy stop at Pod 0, DaemonSets create no Pods, EndpointSlices have no
-  endpoints, and PodDisruptionBudgets settle on zero `disruptionsAllowed`.
-  CronJob schedules by wall clock, so tests that need a Job now create one
-  from the CronJob's `spec.jobTemplate` themselves. A namespace that contained
-  Pods can linger `Terminating` because no kubelet confirms Pod deletion, as
-  upstream. These are expectations on a nodeless plane, not bugs.
+- Pods only run on the simulated Nodes of a dedicated control plane. On the
+  shared one, or on a plane without Nodes, Pods stay `Pending` and the
+  workload controllers stop where node state would be needed: Jobs never
+  finish, StatefulSets with the default `OrderedReady` policy stop at Pod 0,
+  DaemonSets create no Pods, EndpointSlices have no endpoints, and
+  PodDisruptionBudgets settle on zero `disruptionsAllowed`. A namespace that
+  contained Pods can linger `Terminating` because no kubelet confirms Pod
+  deletion, as upstream. These are expectations on a nodeless plane, not
+  bugs.
+- Simulated Nodes run no containers: probes, images, volumes, resource usage
+  and restarts are not simulated, readiness gates are ignored, and Pods stay
+  `Running` until the test finishes them. The Node lifecycle is the test's to
+  drive: no heartbeats or Leases, no taint-based eviction.
+- CronJob schedules by wall clock, so tests that need a Job now create one
+  from the CronJob's `spec.jobTemplate` themselves.
 - kube-apiserver and kine log through klog and logrus, which petri redirects
   process-wide into a buffer that it prints when startup fails. Set
   `PETRI_VERBOSE=1` to also see them on stderr. If your code logs through klog

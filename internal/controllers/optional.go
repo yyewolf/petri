@@ -7,8 +7,8 @@ import (
 
 // OptionalSpecs returns the registry specs of every controller petri can
 // enable by name: the workload set (workloads.go), the EndpointSlice
-// controller, the ServiceAccount and token controllers, ResourceQuota and
-// disruption. None of them run by default — the default set is the namespace
+// controller, the ServiceAccount and token controllers, ResourceQuota,
+// disruption, kube-scheduler and petri's kubelet simulator. None of them run by default — the default set is the namespace
 // controller and the garbage collector — and enabling one never enables
 // another: a ServiceAccount without the token controller creates no token
 // Secrets, and a ResourceQuota without the quota controller is not enforced
@@ -20,6 +20,8 @@ func OptionalSpecs() []Spec {
 		ServiceAccountSpecs(),
 		ResourceQuotaSpecs(),
 		DisruptionSpecs(),
+		SchedulerSpecs(),
+		KubeletSpecs(),
 	)
 }
 

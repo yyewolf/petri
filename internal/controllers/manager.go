@@ -62,6 +62,18 @@ type Manager struct {
 
 	wg sync.WaitGroup
 
+	// buildMu serializes spec.Build calls, and build holds the gate of the
+	// constructor in flight while it does. The upstream constructors are
+	// neither safe to run concurrently (five of them add the same indexer to
+	// the shared Pod informer through a check-then-add, and the Deployment
+	// and Job constructors fail their whole start when a concurrent build
+	// loses that race) nor safe against a started informer replaying its
+	// store into their half-assigned fields (see gate.go); serializing and
+	// gating restores kube-controller-manager's implicit ordering without
+	// touching the constructors.
+	buildMu sync.Mutex
+	build   *buildGate
+
 	mu     sync.Mutex
 	specs  map[string]*Spec
 	starts map[string]*controllerStart
@@ -69,6 +81,12 @@ type Manager struct {
 	// the lock afterwards refuses to start anything the Wait below could
 	// miss.
 	stopped bool
+
+	// workloadsOnce registers the workload specs with the registry on the
+	// first EnableWorkloads call, and workloadsErr records the outcome: the
+	// specs are static, so a Register failure there is a petri bug.
+	workloadsOnce sync.Once
+	workloadsErr  error
 }
 
 // New builds a manager for the control plane reachable through cfg, which
@@ -191,6 +209,13 @@ func (m *Manager) Mapper() meta.ResettableRESTMapper {
 // controller runs.
 func (m *Manager) InformersStarted() <-chan struct{} {
 	return m.informersStarted
+}
+
+// constructorGate returns the gate of the build in flight. Build functions
+// wrap every informer they hand a constructor with it, so no event can fire
+// into a half-built controller; it is nil outside a build.
+func (m *Manager) constructorGate() *buildGate {
+	return m.build
 }
 
 // controllerConfig copies the admin config and stamps a user agent naming the

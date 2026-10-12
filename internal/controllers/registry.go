@@ -152,7 +152,23 @@ func (m *Manager) buildAndStart(spec *Spec) (Run, error) {
 		return nil, fmt.Errorf("petri: control plane is stopping: %w", err)
 	}
 
+	// The constructors run serialized under the build lock and behind the
+	// build gate; see Manager.buildMu and gate.go for why. Everything after
+	// — factory start, sync wait — runs concurrently, as informers and
+	// caches are safe for it.
+	m.buildMu.Lock()
+	gate := newBuildGate()
+	m.build = gate
+
 	run, err := spec.Build(m.ctx, m)
+	if err == nil {
+		// The constructor is complete: register its buffered handlers now,
+		// so a started informer's replay fires into a whole controller.
+		err = gate.flush()
+	}
+
+	m.build = nil
+	m.buildMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("petri: build %s controller: %w", spec.Name, err)
 	}

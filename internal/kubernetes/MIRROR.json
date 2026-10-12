@@ -16,6 +16,9 @@
     "k8s.io/kubernetes/pkg/controller/serviceaccount",
     "k8s.io/kubernetes/pkg/controller/resourcequota",
     "k8s.io/kubernetes/pkg/controller/ttlafterfinished",
-    "k8s.io/kubernetes/pkg/controller/disruption"
+    "k8s.io/kubernetes/pkg/controller/disruption",
+    "k8s.io/kubernetes/pkg/scheduler",
+    "k8s.io/kubernetes/pkg/scheduler/apis/config/latest",
+    "k8s.io/kubernetes/pkg/scheduler/profile"
   ]
 }

@@ -287,6 +287,11 @@ The API server and the upstream controller code are mirrored from
 `k8s.io/kubernetes` into `internal/kubernetes` with their import paths
 rewritten, so they resolve against the published staging modules.
 
+petri asks for no newer Go than the Kubernetes release it embeds. kine is
+mirrored into `internal/kine` for that reason, and only its in-memory driver
+and etcd gRPC server are included, so none of kine's other storage backends
+(SQL drivers, NATS, S3) end up in your module graph.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

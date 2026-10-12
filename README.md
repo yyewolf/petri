@@ -235,6 +235,28 @@ environment's other controllers are opt-in through
 `testEnv.EnableControllers(t, petri.DeploymentController, ...)`, which
 forwards to the control plane.
 
+## Resource usage
+
+One control plane takes about 300 MiB, growing with what tests store: less
+than envtest's three processes, which take about 350 MiB together. Measured
+on Kubernetes 1.37, idle and then after 5,000 writes of 1 KiB ConfigMaps:
+
+| Build      | petri               | envtest             |
+|------------|---------------------|---------------------|
+| plain      | 300 → 370 MiB       | 350 → 420 MiB       |
+| `-race`    | 1.0 → 1.5 GiB       | 400 → 480 MiB       |
+
+The race detector instruments everything compiled into the test binary. With
+envtest that is only your code, since kube-apiserver and etcd are separate
+binaries; with petri it is the whole API server too, and no setting changes
+that. Linking a test binary that imports petri also takes about 3 GiB of RAM,
+against about 1 GiB with envtest.
+
+`go test ./...` builds and runs packages in parallel, so these costs add up
+per package that starts a control plane. On small CI runners, run `-race`
+suites with `-p 1` or `-p 2`, or keep `-race` for the packages that do not
+start one.
+
 ## Versioning
 
 petri versions follow the `k8s.io` staging modules. Use the petri minor that

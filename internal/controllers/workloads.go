@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"k8s.io/client-go/util/flowcontrol"
@@ -79,30 +78,6 @@ func WorkloadSpecs() []Spec {
 		{Name: CronJobName, Build: buildCronJobController},
 		{Name: TTLAfterFinishedName, Build: buildTTLAfterFinishedController},
 	}
-}
-
-// EnableWorkloads registers the workload controllers with the registry once
-// and enables the named ones in order, returning once the last one's
-// informers are synced. Enabling a controller that already runs is a no-op
-// and the calls are safe to make concurrently: the registry coalesces
-// starts, as it does for every controller.
-func (m *Manager) EnableWorkloads(names ...string) error {
-	m.workloadsOnce.Do(func() {
-		m.workloadsErr = m.Register(WorkloadSpecs()...)
-	})
-	if m.workloadsErr != nil {
-		// The spec list is a compile-time constant; reaching this means
-		// petri registered a duplicate name by mistake.
-		return fmt.Errorf("petri: register workload controllers: %w", m.workloadsErr)
-	}
-
-	for _, name := range names {
-		if err := m.Enable(name); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // buildDeploymentController constructs the upstream Deployment controller,

@@ -41,6 +41,35 @@ const (
 	TTLAfterFinishedController Controller = controllers.TTLAfterFinishedName
 )
 
+// The remaining built-in controllers.
+//
+//   - EndpointSlice gives every Service with a selector an EndpointSlice
+//     owned by it, with no endpoints: no Pod is ever Ready on a nodeless
+//     plane. The legacy Endpoints controller and the mirroring controller are
+//     not registered — see internal/controllers/endpointslice.go for the
+//     scoping decision.
+//   - ServiceAccount keeps a default ServiceAccount in every namespace. The
+//     ServiceAccount admission plugin stays disabled: it applies to the whole
+//     API server, and enabling it would make Pod creation race against
+//     ServiceAccount creation in new namespaces.
+//   - ServiceAccountToken fills the tokens of legacy service-account token
+//     Secrets with a JWT signed by the API server's own in-memory signing
+//     key, so a TokenReview authenticates them. It does not mint a Secret per
+//     ServiceAccount any more (1.37 removed that with bound tokens).
+//   - ResourceQuota keeps a quota's status.used tracking reality; the
+//     ResourceQuota admission plugin is on by default, so hard limits are
+//     enforced even while the controller is off.
+//   - Disruption drives PodDisruptionBudget statuses from Pod facts. Without
+//     ready Pods every budget settles on zero disruptionsAllowed, the safe
+//     nodeless value.
+const (
+	EndpointSliceController       Controller = controllers.EndpointSliceName
+	ServiceAccountController      Controller = controllers.ServiceAccountName
+	ServiceAccountTokenController Controller = controllers.ServiceAccountTokenName
+	ResourceQuotaController       Controller = controllers.ResourceQuotaName
+	DisruptionController          Controller = controllers.DisruptionName
+)
+
 // WorkloadControllers returns the workload controllers as a fresh slice, so a
 // test can enable the whole set:
 //
@@ -83,7 +112,7 @@ func (cp *ControlPlane) EnableControllers(t testing.TB, cs ...Controller) {
 		names = append(names, string(c))
 	}
 
-	if err := cp.manager.EnableWorkloads(names...); err != nil {
+	if err := cp.manager.EnableControllers(names...); err != nil {
 		t.Fatal(err)
 	}
 }

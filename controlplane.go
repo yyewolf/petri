@@ -223,8 +223,10 @@ func (cp *ControlPlane) boot(ctx, serverCtx, kineCtx context.Context, options st
 	}
 
 	// The manager is offline and cheap: informers start only when a
-	// controller is enabled, and the RESTMapper discovers on first use.
-	cp.manager, err = controllers.New(serverCtx, cp.Config())
+	// controller is enabled, and the RESTMapper discovers on first use. The
+	// service-account signing key is shared so the token controller's Secret
+	// tokens verify against the API server's public keys.
+	cp.manager, err = controllers.New(serverCtx, cp.Config(), controllers.WithServiceAccountSigningKey(key))
 	if err != nil {
 		return errors.Join(fmt.Errorf("build controller manager: %w", err), opts.SecureServing.Listener.Close())
 	}

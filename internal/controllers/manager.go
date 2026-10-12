@@ -5,6 +5,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"sync"
 	"time"
@@ -82,11 +83,31 @@ type Manager struct {
 	// miss.
 	stopped bool
 
-	// workloadsOnce registers the workload specs with the registry on the
-	// first EnableWorkloads call, and workloadsErr records the outcome: the
-	// specs are static, so a Register failure there is a petri bug.
-	workloadsOnce sync.Once
-	workloadsErr  error
+	// serviceAccountSigningKey is the private key the API server signs
+	// service-account tokens with, shared through WithServiceAccountSigningKey
+	// so the token controller's Secret tokens verify against the API server's
+	// public keys. It is nil on managers wired without it, which only the
+	// token controller's build notices.
+	serviceAccountSigningKey *ecdsa.PrivateKey
+
+	// optionalOnce registers every optional controller's specs with the
+	// registry on the first EnableControllers call, and optionalErr records
+	// the outcome: the specs are static, so a Register failure there is a
+	// petri bug.
+	optionalOnce sync.Once
+	optionalErr  error
+}
+
+// Option adjusts how the manager is wired to its control plane.
+type Option func(*Manager)
+
+// WithServiceAccountSigningKey shares the control plane's in-memory
+// service-account signing key with the manager. The token controller needs it:
+// its Secret tokens must verify against the API server's public keys, which
+// are the public half of this key (see apiserver.go, which generates one key
+// per plane and configures the API server with it).
+func WithServiceAccountSigningKey(key *ecdsa.PrivateKey) Option {
+	return func(m *Manager) { m.serviceAccountSigningKey = key }
 }
 
 // New builds a manager for the control plane reachable through cfg, which
@@ -96,7 +117,7 @@ type Manager struct {
 // Construction starts no goroutines and makes no API calls: informers start
 // when a controller is enabled and the RESTMapper discovers on first use, so
 // building the manager at control-plane start costs nothing measurable.
-func New(ctx context.Context, cfg *rest.Config) (*Manager, error) {
+func New(ctx context.Context, cfg *rest.Config, opts ...Option) (*Manager, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	m := &Manager{
 		ctx:              ctx,
@@ -105,6 +126,10 @@ func New(ctx context.Context, cfg *rest.Config) (*Manager, error) {
 		informersStarted: make(chan struct{}),
 		specs:            make(map[string]*Spec),
 		starts:           make(map[string]*controllerStart),
+	}
+
+	for _, opt := range opts {
+		opt(m)
 	}
 
 	factoryCfg := m.controllerConfig(sharedInformersAgent)

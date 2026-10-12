@@ -5,7 +5,8 @@
 # Environment:
 #   BRANCH           target branch (main or release-1.N)
 #   VERSION          Kubernetes version mirrored, such as v1.37.2
-#   KIND             patch or minor
+#   KIND             patch, minor, or kine (only kine moved)
+#   KINE             kine version mirrored, when kine moved (optional)
 #   MIRROR_OUTCOME   outcome of `make mirror`
 #   TEST_OUTCOME     outcome of the tests; empty when they were skipped
 #   SUBMODULE_OUTCOME outcome of the controllerruntime bump on a minor move:
@@ -18,15 +19,24 @@ set -euo pipefail
 : "${BRANCH:?}" "${VERSION:?}" "${KIND:?}" "${MIRROR_OUTCOME:?}" "${REMOTE:?}"
 gh=${GH:-gh}
 
+kine=${KINE:-}
+command="make mirror K8S_VERSION=$VERSION${kine:+ KINE_VERSION=$kine}"
+
 if [[ -z "$(git status --porcelain)" ]]; then
-	echo "::error::make mirror K8S_VERSION=$VERSION changed nothing; see the 'Regenerate the mirror' step." >&2
+	echo "::error::$command changed nothing; see the 'Regenerate the mirror' step." >&2
 	exit 1
 fi
 
 # One PR per target branch: a newer version updates the pending PR instead of
 # opening a second one next to it.
 head="mirror/$BRANCH"
-title="build: mirror Kubernetes $VERSION"
+if [[ "$KIND" == kine ]]; then
+	title="build: mirror kine $kine"
+elif [[ -n "$kine" ]]; then
+	title="build: mirror Kubernetes $VERSION and kine $kine"
+else
+	title="build: mirror Kubernetes $VERSION"
+fi
 
 git switch -q -C "$head"
 git add -A
@@ -43,7 +53,7 @@ else
 	git push -q --force "$REMOTE" "HEAD:refs/heads/$head"
 fi
 
-body="Regenerated with \`make mirror K8S_VERSION=$VERSION\` by the Mirror workflow."
+body="Regenerated with \`$command\` by the Mirror workflow."
 if [[ "$KIND" == minor ]]; then
 	body="$body
 

@@ -90,6 +90,6 @@ jobs:
           if [[ -n "$(git status --porcelain)" ]]; then
             git status --porcelain
             git diff --stat
-            echo "::error::internal/kubernetes or go.mod differs from 'make mirror' output. Never edit the mirror by hand; run 'make mirror' and commit the result."
+            echo "::error::internal/kubernetes, internal/kine or go.mod differs from 'make mirror' output. Never edit the mirror by hand; run 'make mirror' and commit the result."
             exit 1
           fi

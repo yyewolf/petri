@@ -31,7 +31,7 @@ fail() {
 }
 
 # run <version> <content> <mirror outcome> <test outcome> <open pr> [kind]
-# [submodule outcome]: regenerate in a fresh clone of main and run the script;
+# [submodule outcome] [kine version]: regenerate in a fresh clone of main and run the script;
 # sets $status.
 run() {
 	local version="$1" content="$2" mirror="$3" tests="$4"
@@ -45,7 +45,7 @@ run() {
 	export GIT_AUTHOR_DATE="@$((1700000000 + runs)) +0000" GIT_COMMITTER_DATE="@$((1700000000 + runs)) +0000"
 	status=0
 	(cd "$tmp/work" && BRANCH=main VERSION="$version" KIND="${6:-patch}" MIRROR_OUTCOME="$mirror" \
-		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" SUBMODULE_OUTCOME="${7:-}" "$script") \
+		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" SUBMODULE_OUTCOME="${7:-}" KINE="${8:-}" "$script") \
 		>"$tmp/out.log" 2>&1 || status=$?
 }
 remote_head() { git -C "$tmp/remote.git" rev-parse --verify -q refs/heads/mirror/main || true; }
@@ -118,6 +118,17 @@ logged "pr ready 9 --undo" || fail "failed bump did not open as draft"
 case="patch update does not mention the sub-module"
 run v1.37.6 v1.37.6 success success "" patch success
 grep -qF "controllerruntime" "$tmp/gh.log" && fail "body mentions the sub-module on a patch"
+
+case="kine-only update is titled after kine and names both versions in the command"
+git -C "$tmp/remote.git" update-ref -d refs/heads/mirror/main
+run v1.37.6 kine-v0.17.3 success success "" kine "" v0.17.3
+[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
+logged "--title build: mirror kine v0.17.3 " || fail "wrong title: $(cat "$tmp/gh.log")"
+grep -qF 'make mirror K8S_VERSION=v1.37.6 KINE_VERSION=v0.17.3' "$tmp/gh.log" || fail "body lacks the kine command"
+
+case="Kubernetes and kine together name both in the title"
+run v1.37.7 both success success "10 false" patch "" v0.17.4
+logged "pr edit 10 --title build: mirror Kubernetes v1.37.7 and kine v0.17.4" || fail "wrong title: $(cat "$tmp/gh.log")"
 
 if ((failures > 0)); then
 	echo "$failures check(s) failed"

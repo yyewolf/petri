@@ -46,6 +46,7 @@ jobs:
       BRANCH: ${{ matrix.branch }}
       VERSION: ${{ matrix.version }}
       KIND: ${{ matrix.kind }}
+      KINE: ${{ matrix.kine }}
     steps:
       - name: Require MIRROR_TOKEN
         env:
@@ -84,10 +85,11 @@ jobs:
 
       # Failures here still open a (draft) PR: a broken update, such as a new
       # minor that needs a kine or Go bump, is exactly what needs a human.
+      # An empty KINE keeps the kine version internal/kine/MIRROR.json records.
       - name: Regenerate the mirror
         id: mirror
         continue-on-error: true
-        run: make mirror K8S_VERSION="$VERSION"
+        run: make mirror K8S_VERSION="$VERSION" KINE_VERSION="$KINE"
 
       - name: Bump the controllerruntime sub-module
         id: submodule

@@ -26,6 +26,13 @@ import (
 // constructor makes and flushes them once that constructor returned, so a
 // replay always fires into a whole controller. Build functions wrap every
 // informer they hand a constructor with the gated helpers below.
+//
+// The gate's handle contract: while a build is in flight, every registration
+// buffers, so the handle a constructor gets back from AddEventHandler is nil.
+// Constructors must not retain it — upstream ones only check the error, and a
+// retained nil handle could only be handed to RemoveEventHandler after flush,
+// when the registration it names has already run. Nothing in petri removes
+// handlers, and the constructors this guards never keep the handle.
 
 // buildGate buffers event-handler registrations until flush is called.
 type buildGate struct {

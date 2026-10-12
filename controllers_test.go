@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -518,12 +519,20 @@ func TestTwoPlanesRunDefaultsIndependently(t *testing.T) {
 	deleteConfigMap(ctx, t, untouched.Client(), nsName, ownerName, metav1.DeletePropagationBackground)
 	petri.WaitFor(t, untouched.Client().CoreV1().ConfigMaps(nsName), dependentName, petri.Deleted[*corev1.ConfigMap]())
 
-	// The workload controllers are only process-global in their metrics
-	// registration, which upstream tolerates re-attempting or guards with a
-	// sync.Once: enabling the whole set on both planes in one process must
-	// not panic, and each plane's controllers must actually run.
+	// The workload controllers and the remaining five are only process-global
+	// in their metrics registration, which upstream tolerates re-attempting or
+	// guards with a sync.Once: enabling the full controller set on both planes
+	// in one process must not panic, and each plane's controllers must
+	// actually run.
 	for _, cp := range planes {
 		cp.EnableControllers(t, petri.WorkloadControllers()...)
+		cp.EnableControllers(t,
+			petri.EndpointSliceController,
+			petri.ServiceAccountController,
+			petri.ServiceAccountTokenController,
+			petri.ResourceQuotaController,
+			petri.DisruptionController,
+		)
 	}
 
 	for i, cp := range planes {
@@ -531,6 +540,14 @@ func TestTwoPlanesRunDefaultsIndependently(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewNamespace #%d: %v", i, err)
 		}
+
+		// The ServiceAccount controller reacts on each plane's own
+		// namespace: cross-talk would satisfy one plane with the other's
+		// default ServiceAccount.
+		petri.WaitFor(t, cp.Client().CoreV1().ServiceAccounts(ns), "default", petri.Exists[*corev1.ServiceAccount]())
+
+		// And the EndpointSlice controller produces the slice on that plane.
+		createTwoPlanesService(ctx, t, cp, i, ns)
 
 		rs := &appsv1.ReplicaSet{
 			ObjectMeta: metav1.ObjectMeta{Name: "workloads"},
@@ -567,4 +584,33 @@ func createTwoPlanesFixtures(
 
 	owner := mustCreateConfigMap(ctx, t, cp.Client(), nsName, ownerName, nil)
 	mustCreateConfigMap(ctx, t, cp.Client(), nsName, dependentName, new(configMapOwnerRef(owner)))
+}
+
+// createTwoPlanesService creates a selector Service on one plane and waits for
+// that plane's EndpointSlice controller to name a slice after it, so
+// cross-talk between planes would show up as a missing or duplicated slice.
+func createTwoPlanesService(ctx context.Context, t *testing.T, cp *petri.ControlPlane, i int, ns string) {
+	t.Helper()
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "workloads"},
+			Ports:    []corev1.ServicePort{{Name: "http", Port: 80}},
+		},
+	}
+	if _, err := cp.Client().CoreV1().Services(ns).Create(ctx, service, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create service on plane #%d: %v", i, err)
+	}
+
+	petri.Retry(t, func(context.Context) (bool, error) {
+		list, lerr := cp.Client().DiscoveryV1().EndpointSlices(ns).List(ctx, metav1.ListOptions{
+			LabelSelector: discoveryv1.LabelServiceName + "=web",
+		})
+		if lerr != nil {
+			return false, lerr
+		}
+
+		return len(list.Items) == 1, nil
+	})
 }

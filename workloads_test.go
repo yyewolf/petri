@@ -660,14 +660,23 @@ func TestTTLAfterFinishedDeletesFinishedJobs(t *testing.T) {
 	petri.WaitFor(t, cs.BatchV1().Jobs(ns), job.Name, petri.Deleted[*batchv1.Job]())
 }
 
-// TestEnableControllersIsIdempotentAndParallelSafe enables the whole workload
-// set on the shared control plane from four parallel tests: the calls
-// coalesce into one start per controller, a second call is a no-op, and each
-// test's ReplicaSet created right after the enable is reacted to.
+// TestEnableControllersIsIdempotentAndParallelSafe enables the whole optional
+// controller set — workloads and the five remaining ones — on the shared
+// control plane from four parallel tests: the calls coalesce into one start
+// per controller, a second call is a no-op, and each test's ReplicaSet
+// created right after the enable is reacted to.
 func TestEnableControllersIsIdempotentAndParallelSafe(t *testing.T) {
 	t.Parallel()
 
 	env := petri.Start(t)
+
+	optional := append(petri.WorkloadControllers(),
+		petri.EndpointSliceController,
+		petri.ServiceAccountController,
+		petri.ServiceAccountTokenController,
+		petri.ResourceQuotaController,
+		petri.DisruptionController,
+	)
 
 	for i := range 4 {
 		t.Run(fmt.Sprintf("caller-%d", i), func(t *testing.T) {
@@ -675,8 +684,8 @@ func TestEnableControllersIsIdempotentAndParallelSafe(t *testing.T) {
 
 			ctx := t.Context()
 
-			env.EnableControllers(t, petri.WorkloadControllers()...)
-			env.EnableControllers(t, petri.WorkloadControllers()...)
+			env.EnableControllers(t, optional...)
+			env.EnableControllers(t, optional...)
 
 			cs := clientFor(t, env.Config())
 			ns := env.Namespace(t)
@@ -693,7 +702,9 @@ func TestEnableControllersIsIdempotentAndParallelSafe(t *testing.T) {
 }
 
 // TestEnableControllersWithoutDefaultControllers checks that EnableControllers
-// works on a plane that started with the defaults off.
+// works on a plane that started with the defaults off. The ServiceAccount
+// controller doubles as the proof it ran: its default ServiceAccount appears
+// in a namespace created right after the enable.
 func TestEnableControllersWithoutDefaultControllers(t *testing.T) {
 	t.Parallel()
 
@@ -706,7 +717,7 @@ func TestEnableControllersWithoutDefaultControllers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cp.Stop() })
 
-	cp.EnableControllers(t, petri.ReplicaSetController)
+	cp.EnableControllers(t, petri.ReplicaSetController, petri.ServiceAccountController)
 
 	cs := clientFor(t, cp.Config())
 	ns := newNamespace(ctx, t, cp)
@@ -717,6 +728,8 @@ func TestEnableControllersWithoutDefaultControllers(t *testing.T) {
 	}
 
 	waitForControlledPods(ctx, t, cs, ns, rs.UID, 2)
+
+	petri.WaitFor(t, cs.CoreV1().ServiceAccounts(ns), "default", petri.Exists[*corev1.ServiceAccount]())
 }
 
 // TestEnableControllersAfterObjectsExist covers enabling on a plane that

@@ -56,9 +56,9 @@ The release workflow drafts a GitHub release for each tag.
 
 ## The Kubernetes mirror
 
-`internal/kubernetes` is upstream kube-apiserver code copied from
-`k8s.io/kubernetes` by `hack/mirror`, with import paths rewritten. Never edit
-it by hand; CI regenerates it and fails on any difference.
+`internal/kubernetes` is upstream kube-apiserver and controller code copied
+from `k8s.io/kubernetes` by `hack/mirror`, with import paths rewritten. Never
+edit it by hand; CI regenerates it and fails on any difference.
 
 - `make mirror` regenerates it at the version in `internal/kubernetes/MIRROR.json`.
 - `make mirror K8S_VERSION=v1.37.2` moves to another release and pins go.mod

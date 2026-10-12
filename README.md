@@ -3,7 +3,7 @@
 Real Kubernetes control plane for `go test`. No binaries, no Docker.
 
 > [!WARNING]
-> petri is pre-alpha. The API server works; built-in controllers and fake
+> petri is pre-alpha. The API server and the built-in controllers work; fake
 > kubelets are not implemented yet, and the API will change.
 
 ## Why
@@ -13,15 +13,16 @@ needs etcd and kube-apiserver binaries downloaded with `setup-envtest` and a
 `KUBEBUILDER_ASSETS` variable pointing at them. Without that setup, `go test`
 fails.
 
-envtest also runs only an API server. No controller-manager or scheduler runs,
-so Deployments never create ReplicaSets, Pods never run, and ownerReference
-garbage collection never fires.
+envtest also runs only an API server. No controller-manager runs, so
+Deployments never create ReplicaSets and ownerReference garbage collection
+never fires.
 
 petri runs the real kube-apiserver inside the test process as a Go library,
 over an in-memory store, so `go test ./...` works on a fresh checkout and
 nothing is written to disk unless a test asks for a webhook serving
-certificate, which is the only disk use. Opt-in built-in controllers and fake
-kubelets are planned next.
+certificate, which is the only disk use. It runs upstream built-in controllers
+too: the namespace controller and the garbage collector by default, twelve
+more on demand. A scheduler and fake kubelets are planned next.
 
 ## Usage
 
@@ -44,11 +45,59 @@ lifecycle; the caller owns deletion.
 
 The API server is upstream kube-apiserver code, so you get upstream
 defaulting, validation, strategic merge patch, RBAC, and ClusterIP allocation.
-Service accounts are not provisioned and the `ServiceAccount` admission plugin
-is disabled, as in envtest.
+The `ServiceAccount` admission plugin is disabled, as in envtest, so Pod
+creation in a fresh namespace does not race against ServiceAccount creation;
+the ServiceAccount controller fills that gap once enabled, keeping a `default`
+ServiceAccount in every namespace.
 
-The first `go test` compiles the API server and takes a few minutes. Later
-runs use the build cache.
+Built-in controllers run by default. Every control plane runs the namespace
+controller and the garbage collector, and `Start` and `New` return only once
+their informers are synced, so an object created right after startup is seen
+by both. A deleted namespace really goes away, and deleting an owner deletes
+its dependents, with foreground, background and orphan propagation as on a
+real cluster. Resources served by a CRD installed after startup are collected
+too.
+
+The shared control plane always runs the defaults. A dedicated one can start
+without them:
+
+```go
+cp, err := petri.New(ctx, petri.WithoutDefaultControllers())
+```
+
+Deleted namespaces then stay `Terminating` with their contents, and deleting
+an owner leaves its dependents behind: the semantics of envtest.
+
+The remaining controllers are opt-in per plane:
+
+```go
+env.EnableControllers(t, petri.DeploymentController, petri.ReplicaSetController)
+```
+
+`EnableControllers` is idempotent, safe to call from parallel tests, and
+returns once the enabled controllers' informers are synced. Controllers stay
+enabled once enabled, and enabling one never enables another: the Deployment
+controller alone creates ReplicaSets but no Pods, because the ReplicaSet
+controller is off. A plane started with `WithoutDefaultControllers` can enable
+controllers too.
+
+The workload controllers — `petri.DeploymentController`,
+`petri.ReplicaSetController`, `petri.StatefulSetController`,
+`petri.DaemonSetController`, `petri.JobController`, `petri.CronJobController`
+and `petri.TTLAfterFinishedController` — are available as one slice from
+`petri.WorkloadControllers()`. The others are `petri.EndpointSliceController`,
+`petri.ServiceAccountController`, `petri.ServiceAccountTokenController`,
+`petri.ResourceQuotaController` and `petri.DisruptionController`.
+`petri.ServiceAccountTokenController` signs legacy service-account token
+Secrets with the plane's in-memory key, so a TokenReview authenticates them.
+`petri.ResourceQuotaController` keeps a quota's `status.used` current; quota
+admission is on, so hard limits are enforced even with the controller off.
+`petri.DisruptionController` fills in PodDisruptionBudget statuses; with no
+ready Pods, every budget settles on zero `disruptionsAllowed`.
+
+The first `go test` compiles the API server and its controller code and takes
+a few minutes; the controllers add about 33,000 lines and a couple of seconds
+to that first compile. Later runs use the build cache and are unchanged.
 
 ## Helpers
 
@@ -167,12 +216,24 @@ supported fields are `CRDDirectoryPaths`, `CRDs`, `ErrorIfCRDPathMissing`,
 `WebhookInstallOptions.Paths`, `WebhookInstallOptions.MutatingWebhooks`,
 `WebhookInstallOptions.ValidatingWebhooks`, `WebhookInstallOptions.LocalServingHost`,
 `WebhookInstallOptions.LocalServingPort`, `WebhookInstallOptions.LocalServingCertDir`,
-`Scheme` and `AttachControlPlaneOutput`. Fields that would change what a test
-tests fail `Start`: `UseExistingCluster` and `BinaryAssetsDirectory` (petri
-runs no binaries, so setup-envtest can be dropped), and
-`CRDInstallOptions.CleanUpAfterUse` (CRDs are never deleted). Unlike envtest,
-a missing or manifest-less CRD path always fails; `ErrorIfCRDPathMissing` is
-accepted for compatibility.
+`Scheme`, `AttachControlPlaneOutput` and `DisableDefaultControllers`. Fields
+that would change what a test tests fail `Start`: `UseExistingCluster` and
+`BinaryAssetsDirectory` (petri runs no binaries, so setup-envtest can be
+dropped), and `CRDInstallOptions.CleanUpAfterUse` (CRDs are never deleted).
+Unlike envtest, a missing or manifest-less CRD path always fails;
+`ErrorIfCRDPathMissing` is accepted for compatibility.
+
+Unlike envtest, the environment runs petri's default controllers: deleted
+namespaces really go away and deleting an owner cascades to its dependents.
+Expect one consequence: a namespace whose custom resource carries a finalizer
+nobody removes stays `Terminating`, because the namespace waits for the stuck
+object. That is correct namespace and garbage-collection behaviour, not a
+petri bug; the `controllerruntime/envtest` package documentation covers it.
+Remove the finalizer in the test's cleanup, or set `DisableDefaultControllers`
+for strict envtest parity, which keeps deleted namespaces `Terminating`. The
+environment's other controllers are opt-in through
+`testEnv.EnableControllers(t, petri.DeploymentController, ...)`, which
+forwards to the control plane.
 
 ## Versioning
 
@@ -197,9 +258,15 @@ minor a build targets.
   equals your `client-go` minor. Testing a client against an older or newer
   API server (version-skew testing) is out of scope. envtest can do that
   because its binaries are separate from your code.
-- No controllers run yet. Deleted namespaces stay `Terminating` with their
-  contents, Deployments do not create ReplicaSets, and garbage collection does
-  not run.
+- Built-in controllers run, but there is no scheduler and no kubelet, so Pods
+  stay `Pending`. The workload controllers stop where node state would be
+  needed: Jobs never finish, StatefulSets with the default `OrderedReady`
+  policy stop at Pod 0, DaemonSets create no Pods, EndpointSlices have no
+  endpoints, and PodDisruptionBudgets settle on zero `disruptionsAllowed`.
+  CronJob schedules by wall clock, so tests that need a Job now create one
+  from the CronJob's `spec.jobTemplate` themselves. A namespace that contained
+  Pods can linger `Terminating` because no kubelet confirms Pod deletion, as
+  upstream. These are expectations on a nodeless plane, not bugs.
 - kube-apiserver and kine log through klog and logrus, which petri redirects
   process-wide into a buffer that it prints when startup fails. Set
   `PETRI_VERBOSE=1` to also see them on stderr. If your code logs through klog
@@ -216,9 +283,9 @@ and resolves them with `replace` directives, which Go ignores in dependencies.
 Importing it would force every user to copy those directives into their own
 go.mod, so petri only depends on modules that resolve without them.
 
-The API server code is mirrored from `k8s.io/kubernetes` into
-`internal/kubernetes` with its import paths rewritten, so it resolves against
-the published staging modules.
+The API server and the upstream controller code are mirrored from
+`k8s.io/kubernetes` into `internal/kubernetes` with their import paths
+rewritten, so they resolve against the published staging modules.
 
 ## Contributing
 

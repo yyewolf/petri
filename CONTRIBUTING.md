@@ -70,6 +70,17 @@ Never edit either by hand; CI regenerates them and fails on any difference.
 Each tree's `MIRROR.json` lists the upstream packages petri needs (`roots`)
 and records the mirrored version. Add a root there, not a file.
 
+The only allowed differences from upstream are the patches in
+`hack/mirror/patches/<kubernetes|kine>/`: unified diffs with paths relative
+to the mirror directory, applied in name order after the import rewrite. Keep
+them small and say in the patched code why it differs. Today one patch
+replaces kine's import of etcd's server module, used for a single constant,
+which keeps etcd's server, raft and bbolt out of every user's graph. When an
+update makes a patch fail, `make mirror` stops and names it: rebase it onto
+the new upstream, or drop it if upstream made it unnecessary.
+`TestBuildGraphStaysLean` fails if a module petri keeps out, such as etcd's
+server or one of kine's storage backends, is built again.
+
 - `make mirror` regenerates both at the versions their `MIRROR.json` records.
 - `make mirror K8S_VERSION=v1.37.2` moves to another Kubernetes release and
   pins go.mod to the module versions that release uses.

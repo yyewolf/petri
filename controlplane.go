@@ -42,6 +42,18 @@ type ControlPlane struct {
 	webhookCA *webhookCA // generated at startup; signs webhook serving certificates
 	shared    bool       // set on the plane Start hands out; conversion webhooks are refused there
 
+	// nodesMu guards nodeCount, the network index of the next Node AddNode
+	// creates, and scheduling, which keeps kube-scheduler and manual
+	// placement apart (see scheduling.go).
+	nodesMu    sync.Mutex
+	nodeCount  int
+	scheduling schedulingMode
+
+	// pods hands unscheduled Pods to expectations; it starts on first use
+	// and Stop releases it (see expect.go).
+	podsOnce sync.Once
+	pods     atomic.Pointer[podDispatcher]
+
 	done     chan struct{} // closed when the server goroutine returns; nil until it starts
 	serveErr error         // written before done is closed
 
@@ -139,6 +151,15 @@ func (cp *ControlPlane) Client() *kubernetes.Clientset {
 func (cp *ControlPlane) Stop() error {
 	cp.stopOnce.Do(func() {
 		cp.stopped.Store(true)
+
+		// Pod expectations go first: their actions write through the API.
+		// Running the once here also keeps a dispatcher from starting after
+		// Stop.
+		cp.podsOnce.Do(func() {})
+
+		if d := cp.pods.Load(); d != nil {
+			d.stop()
+		}
 
 		// Controllers go first: they stop writing before the API server
 		// dies, and Stop does not return until everything the manager

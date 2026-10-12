@@ -13,8 +13,8 @@ type Controller string
 
 // The workload controllers.
 //
-// Pods never leave Pending — petri runs no scheduler and no kubelets — so
-// each controller stops where node state would be needed:
+// Without Nodes ([ControlPlane.AddNode]) Pods never leave Pending, so on a
+// nodeless plane each controller stops where node state would be needed:
 //
 //   - Deployment creates ReplicaSets. Enabling it alone creates no Pods:
 //     enabling a controller never enables another. Enable ReplicaSet too for
@@ -31,6 +31,11 @@ type Controller string
 //     spec.jobTemplate themselves.
 //   - TTLAfterFinished deletes Jobs ttlSecondsAfterFinished seconds after a
 //     Complete or Failed condition marks them finished.
+//
+// On a dedicated plane with Nodes, the chain runs end to end: Deployments
+// become Available, StatefulSets roll out Pod after Pod, DaemonSets place a
+// Pod per eligible Node, and Jobs complete once the test completes their
+// Pods with [ControlPlane.CompletePod].
 const (
 	DeploymentController       Controller = controllers.DeploymentName
 	ReplicaSetController       Controller = controllers.ReplicaSetName
@@ -70,6 +75,14 @@ const (
 	DisruptionController          Controller = controllers.DisruptionName
 )
 
+// SchedulerController runs upstream kube-scheduler with its default profile,
+// placing Pods on the Nodes from [ControlPlane.AddNode] by their requests,
+// taints and tolerations, node selectors, affinities and topology spread, as
+// on a real cluster. It is only available on a dedicated control plane, and
+// it excludes placing Pods by hand: a plane uses either the scheduler or
+// [ControlPlane.Bind] and Pod expectations, never both.
+const SchedulerController Controller = controllers.SchedulerName
+
 // WorkloadControllers returns the workload controllers as a fresh slice, so a
 // test can enable the whole set:
 //
@@ -108,6 +121,10 @@ func (cp *ControlPlane) EnableControllers(t testing.TB, cs ...Controller) {
 
 	if len(cs) == 0 {
 		return
+	}
+
+	if err := cp.claimSchedulerFor(cs); err != nil {
+		t.Fatal(err)
 	}
 
 	names := make([]string, 0, len(cs))

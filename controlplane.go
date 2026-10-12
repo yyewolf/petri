@@ -77,10 +77,13 @@ func WithoutDefaultControllers() Option {
 // New starts a dedicated control plane. ctx bounds startup only; call Stop to
 // shut it down.
 //
-// By default the plane runs the namespace controller and the garbage collector,
-// and New returns only once their informers are synced, so the first object a
-// test creates right after startup is seen by both. Pass
-// [WithoutDefaultControllers] to start without them.
+// By default the plane runs the namespace controller and the garbage
+// collector, and New returns only once their informers are synced, so the
+// first object a test creates right after startup is seen by both. The
+// guarantee covers the manager's factory informers: the collector's
+// per-resource monitors sync asynchronously after that, with their initial
+// lists covering the practical guarantee. Pass [WithoutDefaultControllers] to
+// start without them.
 func New(ctx context.Context, opts ...Option) (*ControlPlane, error) {
 	logs := processLog()
 

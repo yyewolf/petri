@@ -53,6 +53,13 @@ func (s source) retiredDir(repo string) string {
 	return filepath.Join(repo, "internal", "."+s.name+"-old")
 }
 
+// patchDir holds the reviewed changes to s's mirror: unified diffs with paths
+// relative to the mirror directory, applied in name order after imports are
+// rewritten. They are the only way mirrored code may differ from upstream.
+func (s source) patchDir(repo string) string {
+	return filepath.Join(repo, "hack", "mirror", "patches", s.name)
+}
+
 // mirrored reports whether module is one of the mirrored upstreams.
 func mirrored(module string) bool {
 	return slices.ContainsFunc(sources, func(s source) bool { return s.module == module })
@@ -124,6 +131,10 @@ func runSync(ctx context.Context, repo, kubeVer, kineVer string) error {
 
 	for _, src := range sources {
 		if err = writeTree(src.stagedDir(repo), src, upstream[src.module], pkgs[src.module], staged[src]); err != nil {
+			return err
+		}
+
+		if err = applyPatches(ctx, repo, src); err != nil {
 			return err
 		}
 	}
@@ -270,6 +281,30 @@ func writeTree(dst string, src source, upstream downloadedModule, pkgs map[strin
 	}
 
 	return m.write(filepath.Join(dst, manifestName))
+}
+
+// applyPatches applies src's patches to its staged tree. A patch that no longer
+// applies fails the sync: it must be rebased onto the new upstream, or dropped
+// when upstream made it unnecessary.
+func applyPatches(ctx context.Context, repo string, src source) error {
+	patches, err := filepath.Glob(filepath.Join(src.patchDir(repo), "*.patch"))
+	if err != nil {
+		return fmt.Errorf("list %s patches: %w", src.name, err)
+	}
+
+	staged, err := filepath.Rel(repo, src.stagedDir(repo))
+	if err != nil {
+		return fmt.Errorf("locate staged %s mirror: %w", src.name, err)
+	}
+
+	for _, p := range patches {
+		if _, err = gitCmd(ctx, repo, "apply", "--directory="+filepath.ToSlash(staged), p); err != nil {
+			return fmt.Errorf("patch %s no longer applies to the %s mirror; rebase or drop it: %w",
+				filepath.Base(p), src.name, err)
+		}
+	}
+
+	return nil
 }
 
 // mirrorFile copies file f of package p to path, rewriting the imports of every

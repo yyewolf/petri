@@ -2,6 +2,24 @@
 // sigs.k8s.io/controller-runtime/pkg/envtest: it runs a real kube-apiserver
 // inside the test process instead of downloading binaries, so a kubebuilder
 // test suite switches to petri by changing its import path.
+//
+// # Differences from envtest
+//
+// The control plane runs petri's default controllers, the namespace controller
+// and the garbage collector, where envtest runs no controllers at all. That is
+// deliberate, because running petri's controllers is the drop-in's value:
+//
+//   - A deleted namespace really goes away. envtest leaves it Terminating
+//     forever, and so does an environment started with
+//     DisableDefaultControllers.
+//   - Deleting an owner cascades to its dependents, with foreground,
+//     background and orphan propagation behaving as on a real cluster.
+//
+// The one surprise this can cause: a namespace whose custom resource carries a
+// finalizer nobody removes stays Terminating. That is correct namespace and
+// garbage-collection behaviour — the namespace waits for the stuck object —
+// not a petri bug. Remove the finalizer in the test's cleanup, or start the
+// environment with DisableDefaultControllers for strict envtest parity.
 package envtest
 
 import (
@@ -53,6 +71,16 @@ type Environment struct {
 	// AttachControlPlaneOutput mirrors envtest's field: it makes the control
 	// plane log to stderr, like setting PETRI_VERBOSE=1.
 	AttachControlPlaneOutput bool
+	// DisableDefaultControllers starts the control plane without petri's
+	// default controllers, the namespace controller and the garbage
+	// collector. The drop-in runs them by default because that is petri's
+	// value: deleted namespaces really go away and owner deletion cascades.
+	// Set it for tests that rely on envtest semantics, where no controllers
+	// run: deleted namespaces then stay Terminating with their contents, and
+	// a namespace stuck on a finalizer looks like any other Terminating
+	// namespace instead of waiting for its contents to be freed. The zero
+	// value keeps the petri defaults, so existing suites are unaffected.
+	DisableDefaultControllers bool
 
 	// UseExistingCluster is meaningless here: petri never reuses a cluster.
 	// Setting it fails Start, because ignoring it would change what the test
@@ -106,7 +134,14 @@ func (e *Environment) Start() (*rest.Config, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 
-	cp, err := petri.New(ctx)
+	// The zero value keeps today's behaviour: the petri defaults run, so an
+	// existing suite never changes. Only an explicit opt-out turns them off.
+	var opts []petri.Option
+	if e.DisableDefaultControllers {
+		opts = append(opts, petri.WithoutDefaultControllers())
+	}
+
+	cp, err := petri.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("petri envtest: start control plane: %w", err)
 	}

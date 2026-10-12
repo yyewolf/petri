@@ -9,6 +9,7 @@ import (
 	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -17,8 +18,15 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 
+	"github.com/yyewolf/petri"
 	"github.com/yyewolf/petri/controllerruntime/envtest"
 )
+
+// envtestSemanticsWindow is how long the opt-out test waits to confirm that
+// nothing happens. The namespace controller delays its first pass by a 5s
+// grace period, so a window longer than that proves the controllers are not
+// running, not merely slow.
+const envtestSemanticsWindow = 6 * time.Second
 
 // podWebhookConfig is a service-based webhook manifest, the shape a
 // kubebuilder config/webhook manifest ships with.
@@ -253,4 +261,135 @@ func TestEnvironmentStopWithoutStart(t *testing.T) {
 	if err := env.Stop(); err == nil {
 		t.Fatal("Stop without Start succeeded, want an error")
 	}
+}
+
+// TestDeletedNamespaceFullyDisappears pins the drop-in's default: petri runs
+// the namespace controller, so a deleted namespace is not merely Terminating
+// but is removed once its contents are gone, where envtest would leave it.
+func TestDeletedNamespaceFullyDisappears(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+
+	env := &envtest.Environment{}
+	cfg, err := env.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = env.Stop() })
+
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("build client: %v", err)
+	}
+
+	ns := createNamespaceForTest(ctx, t, cs, "dropin-defaults")
+
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "in-ns", Namespace: ns}}
+	if _, createErr := cs.CoreV1().ConfigMaps(ns).Create(ctx, cm, metav1.CreateOptions{}); createErr != nil {
+		t.Fatalf("create configmap: %v", createErr)
+	}
+
+	if delErr := cs.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{}); delErr != nil {
+		t.Fatalf("delete namespace: %v", delErr)
+	}
+
+	petri.WaitFor(t, cs.CoreV1().Namespaces(), ns, petri.Deleted[*corev1.Namespace]())
+	petri.WaitFor(t, cs.CoreV1().ConfigMaps(ns), "in-ns", petri.Deleted[*corev1.ConfigMap]())
+}
+
+// TestDisableDefaultControllersMatchesEnvtest starts the drop-in with the
+// default controllers off and proves envtest parity: a deleted namespace stays
+// Terminating with its contents, and owner references do not cascade.
+func TestDisableDefaultControllersMatchesEnvtest(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+
+	env := &envtest.Environment{DisableDefaultControllers: true}
+	cfg, err := env.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = env.Stop() })
+
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("build client: %v", err)
+	}
+
+	ns := createNamespaceForTest(ctx, t, cs, "dropin-optout")
+
+	owner := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "owner", Namespace: ns}}
+	if owner, err = cs.CoreV1().ConfigMaps(ns).Create(ctx, owner, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+
+	dependent := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dependent",
+			Namespace: ns,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "v1", Kind: "ConfigMap", Name: owner.Name, UID: owner.UID,
+			}},
+		},
+	}
+	if _, createErr := cs.CoreV1().ConfigMaps(ns).Create(ctx, dependent, metav1.CreateOptions{}); createErr != nil {
+		t.Fatalf("create dependent: %v", createErr)
+	}
+
+	// A deleted namespace is marked Terminating by the API server itself, but
+	// with no namespace controller it is never finalized and its contents
+	// stay.
+	if delErr := cs.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{}); delErr != nil {
+		t.Fatalf("delete namespace: %v", delErr)
+	}
+
+	petri.WaitFor(t, cs.CoreV1().Namespaces(), ns, namespaceTerminating)
+
+	// Owner references do not cascade: the owner is really deleted, the
+	// dependent is left behind.
+	if delErr := cs.CoreV1().ConfigMaps(ns).Delete(ctx, owner.Name, metav1.DeleteOptions{}); delErr != nil {
+		t.Fatalf("delete owner: %v", delErr)
+	}
+
+	time.Sleep(envtestSemanticsWindow)
+
+	terminating, err := cs.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("namespace vanished with the controllers off: %v", err)
+	}
+	if terminating.Status.Phase != corev1.NamespaceTerminating {
+		t.Errorf("namespace phase = %q, want Terminating", terminating.Status.Phase)
+	}
+
+	if _, getErr := cs.CoreV1().ConfigMaps(ns).Get(ctx, "dependent", metav1.GetOptions{}); getErr != nil {
+		t.Fatalf("dependent was garbage collected with the controllers off: %v", getErr)
+	}
+}
+
+// namespaceTerminating holds once the namespace is marked Terminating, which
+// the API server does itself on deletion.
+func namespaceTerminating(ns *corev1.Namespace) (bool, error) {
+	if ns == nil {
+		return false, nil
+	}
+
+	return ns.Status.Phase == corev1.NamespaceTerminating, nil
+}
+
+// createNamespaceForTest creates a namespace with the given name. Every Start
+// runs a dedicated control plane, so the name cannot collide with another
+// test's.
+func createNamespaceForTest(ctx context.Context, t *testing.T, cs *kubernetes.Clientset, name string) string {
+	t.Helper()
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create namespace %s: %v", name, err)
+	}
+
+	return name
 }

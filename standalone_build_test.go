@@ -2,7 +2,9 @@ package petri_test
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -43,6 +45,43 @@ func TestControllerruntimeGoModSanity(t *testing.T) {
 
 	if !strings.Contains(gomod, "sigs.k8s.io/controller-runtime") {
 		t.Error("controllerruntime/go.mod does not require sigs.k8s.io/controller-runtime")
+	}
+}
+
+// TestBuildGraphStaysLean fails when a module petri deliberately keeps out of
+// its users' graphs is built again. kine is mirrored so its go directive cannot
+// raise the users' Go floor; its other storage backends and etcd's server only
+// come back through upstream changes the mirror would otherwise take in
+// silently. go.mod is not checked: tidy keeps etcd's server there for a test of
+// k8s.io/apiserver, which users never build.
+func TestBuildGraphStaysLean(t *testing.T) {
+	t.Parallel()
+
+	out, err := exec.CommandContext(t.Context(), "go", "list", "-deps", "-f", "{{with .Module}}{{.Path}}{{end}}", ".").
+		Output()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
+	}
+
+	built := strings.Fields(string(out))
+
+	for _, banned := range []string{
+		"github.com/k3s-io/kine",         // mirrored into internal/kine
+		"go.etcd.io/etcd/server/v3",      // patched out by hack/mirror/patches/kine
+		"go.etcd.io/raft/v3",             // etcd server
+		"go.etcd.io/bbolt",               // etcd server
+		"github.com/nats-io/",            // kine's NATS backend
+		"github.com/jackc/pgx/",          // kine's Postgres backend
+		"github.com/go-sql-driver/mysql", // kine's MySQL backend
+		"github.com/mattn/go-sqlite3",    // kine's SQLite backend (cgo)
+		"modernc.org/sqlite",             // kine's SQLite backend
+		"github.com/minio/minio-go/",     // kine's S3 snapshots
+		"github.com/cockroachdb/pebble",  // kine's t4 backend
+		"github.com/t4db/t4",             // kine's t4 backend
+	} {
+		if slices.ContainsFunc(built, func(m string) bool { return strings.HasPrefix(m, banned) }) {
+			t.Errorf("petri builds %s again; `go mod why -m` names the import that brought it back", banned)
+		}
 	}
 }
 

@@ -6,11 +6,14 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
-	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/protobuf/proto"
 )
 
 const initialBatchSize = 10
+
+// maxRequestBytes is etcd's embed.DefaultMaxRequestBytes. petri patches it in
+// so the mirror does not import etcd's server module for one constant.
+const maxRequestBytes = 1.5 * 1024 * 1024
 
 // adjustBatchSize picks the next batch's size so each batch lands near
 // the target size: too small wastes round-trips, too large produces
@@ -67,7 +70,7 @@ func (l *LimitedServer) RangeStream(r *etcdserverpb.RangeRequest, rs etcdserverp
 		for kv := range lr.KVc {
 			if len(kvs) == batchSize {
 				resp := &etcdserverpb.RangeResponse{Kvs: toKVs(kvs...)}
-				batchSize = adjustBatchSize(batchSize, proto.Size(resp), embed.DefaultMaxRequestBytes)
+				batchSize = adjustBatchSize(batchSize, proto.Size(resp), maxRequestBytes)
 				kvs = kvs[:0]
 				if err := rs.Send(&etcdserverpb.RangeStreamResponse{RangeResponse: resp}); err != nil {
 					return err

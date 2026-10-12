@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -270,12 +271,16 @@ func runBuiltInPropagation(
 
 	if policy == metav1.DeletePropagationOrphan {
 		// The owner is collected but the dependent survives without the
-		// reference.
+		// reference. The wait holds until the GC stripped the references:
+		// a plain Exists observes the dependent while orphaning is still in
+		// flight.
 		petri.WaitFor(t, cs.CoreV1().ConfigMaps(ns), owner.Name, petri.Deleted[*corev1.ConfigMap]())
 
-		got := petri.WaitFor(t, cs.CoreV1().ConfigMaps(ns), dependent.Name, petri.Exists[*corev1.ConfigMap]())
-		if len(got.OwnerReferences) != 0 {
-			t.Errorf("orphaned dependent still has owner references: %v", got.OwnerReferences)
+		got := petri.WaitFor(t, cs.CoreV1().ConfigMaps(ns), dependent.Name, func(cm *corev1.ConfigMap) (bool, error) {
+			return cm != nil && len(cm.OwnerReferences) == 0, nil
+		})
+		if got == nil {
+			t.Fatal("orphaned dependent disappeared")
 		}
 
 		return
@@ -320,6 +325,7 @@ func TestGarbageCollectorPropagatesForCustomResources(t *testing.T) {
 		{name: "custom-owner-background", policy: metav1.DeletePropagationBackground},
 		{name: "custom-owner-foreground", policy: metav1.DeletePropagationForeground, block: true},
 		{name: "custom-owner-orphan", policy: metav1.DeletePropagationOrphan},
+		{name: "custom-owner-builtin-dependent", dependentBuilt: true, policy: metav1.DeletePropagationBackground},
 		{name: "custom-dependent", ownerBuiltIn: true, policy: metav1.DeletePropagationBackground},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -376,12 +382,16 @@ func runCustomPropagation(ctx context.Context, t *testing.T, cp *petri.ControlPl
 
 	if tt.policy == metav1.DeletePropagationOrphan {
 		// The owner is collected but the dependent survives without the
-		// reference.
+		// reference. The wait holds until the GC stripped the references:
+		// a plain Exists observes the dependent while orphaning is still in
+		// flight.
 		petri.WaitFor(t, ownerClient, "owner", petri.Deleted[*unstructured.Unstructured]())
 
-		got := petri.WaitFor(t, dependentClient, "dependent", petri.Exists[*unstructured.Unstructured]())
-		if len(got.GetOwnerReferences()) != 0 {
-			t.Errorf("orphaned dependent still has owner references: %v", got.GetOwnerReferences())
+		got := petri.WaitFor(t, dependentClient, "dependent", func(u *unstructured.Unstructured) (bool, error) {
+			return u != nil && len(u.GetOwnerReferences()) == 0, nil
+		})
+		if got == nil {
+			t.Fatal("orphaned dependent disappeared")
 		}
 
 		return
@@ -507,6 +517,40 @@ func TestTwoPlanesRunDefaultsIndependently(t *testing.T) {
 	// Its garbage collector still works: deleting the owner cascades there.
 	deleteConfigMap(ctx, t, untouched.Client(), nsName, ownerName, metav1.DeletePropagationBackground)
 	petri.WaitFor(t, untouched.Client().CoreV1().ConfigMaps(nsName), dependentName, petri.Deleted[*corev1.ConfigMap]())
+
+	// The workload controllers are only process-global in their metrics
+	// registration, which upstream tolerates re-attempting or guards with a
+	// sync.Once: enabling the whole set on both planes in one process must
+	// not panic, and each plane's controllers must actually run.
+	for _, cp := range planes {
+		cp.EnableControllers(t, petri.WorkloadControllers()...)
+	}
+
+	for i, cp := range planes {
+		ns, err := cp.NewNamespace(ctx)
+		if err != nil {
+			t.Fatalf("NewNamespace #%d: %v", i, err)
+		}
+
+		rs := &appsv1.ReplicaSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "workloads"},
+			Spec: appsv1.ReplicaSetSpec{
+				Replicas: new(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "workloads"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "workloads"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web", Image: "nginx:1.0"}}},
+				},
+			},
+		}
+
+		created, err := cp.Client().AppsV1().ReplicaSets(ns).Create(ctx, rs, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("create replicaset on plane #%d: %v", i, err)
+		}
+
+		waitForControlledPods(ctx, t, cp.Client(), ns, created.UID, 2)
+	}
 }
 
 // createTwoPlanesFixtures creates the same namespace and ConfigMap pair on one

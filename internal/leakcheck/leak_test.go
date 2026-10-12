@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -60,6 +61,17 @@ func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
 
 	if n := waitAtMost(t, baseline+slack); n > baseline+slack {
 		t.Fatalf("%d goroutines after %d stub-manager cycles, want at most %d (baseline %d + %d)\n%s",
+			n, cycles, baseline+slack, baseline, slack, goroutineDump())
+	}
+
+	// Every workload controller enabled beside the defaults: their informers,
+	// workers, queues and event broadcasters must all release with the plane.
+	for range cycles {
+		workloadCycle(t)
+	}
+
+	if n := waitAtMost(t, baseline+slack); n > baseline+slack {
+		t.Fatalf("%d goroutines after %d workload-controller cycles, want at most %d (baseline %d + %d)\n%s",
 			n, cycles, baseline+slack, baseline, slack, goroutineDump())
 	}
 }
@@ -160,6 +172,66 @@ func runStubController(t *testing.T, cp *petri.ControlPlane) {
 	}
 
 	mgr.Stop()
+}
+
+// workloadCycle starts a plane, enables every workload controller beside the
+// defaults, and gives them real work: a Deployment the chain reacts to, and a
+// namespace deletion the namespace controller and the garbage collector have
+// to wind down while the workload controllers hold informers open.
+func workloadCycle(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), startTimeout)
+	defer cancel()
+
+	cp, err := petri.New(ctx)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	cp.EnableControllers(t, petri.WorkloadControllers()...)
+
+	ns, err := cp.NewNamespace(ctx)
+	if err != nil {
+		t.Fatalf("NewNamespace: %v", err)
+	}
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "churn"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "churn"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "churn"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web", Image: "nginx:1.0"}}},
+			},
+		},
+	}
+	if _, err = cp.Client().AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create deployment: %v", err)
+	}
+
+	// Let the chain react so Stop releases controllers with live queues and
+	// workers, not freshly synced informers.
+	petri.Retry(t, func(context.Context) (bool, error) {
+		rss, lerr := cp.Client().AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{})
+		if lerr != nil {
+			return false, lerr
+		}
+
+		return len(rss.Items) > 0, nil
+	})
+
+	background := metav1.DeletePropagationBackground
+	if err = cp.Client().
+		CoreV1().
+		Namespaces().
+		Delete(ctx, ns, metav1.DeleteOptions{PropagationPolicy: &background}); err != nil {
+		t.Fatalf("delete namespace: %v", err)
+	}
+
+	if err = cp.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
 }
 
 // stableCount waits until the goroutine count has not changed for stableFor

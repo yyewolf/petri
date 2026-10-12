@@ -36,9 +36,134 @@ var registerKineDriver = sync.OnceFunc(func() { //nolint:gochecknoglobals // kin
 			return false, nil, fmt.Errorf("kine memory driver: %w", err)
 		}
 
-		return leaderElect, clippedBackend{backend}, nil
+		return leaderElect, clippedBackend{&lockedBackend{Backend: backend}}, nil
 	})
 })
+
+// lockedBackend serializes the memory driver's reads against its writes.
+// kine's memory driver keeps every read but ListStream under its own lock;
+// the streaming one iterates its store on a goroutine with no lock held, so
+// an informer list racing a create trips the race detector inside the driver.
+// Every non-watch call runs under one mutex here, and ListStream drains its
+// stream before returning, so the store never changes while it is read.
+// Watch stays unlocked: its snapshot path locks itself, and it runs for the
+// plane's whole life.
+type lockedBackend struct {
+	server.Backend // Start and Watch pass straight through.
+
+	mu sync.Mutex
+}
+
+func (b *lockedBackend) Get(
+	ctx context.Context, key string, revision int64, keysOnly bool,
+) (int64, *server.KeyValue, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Get(ctx, key, revision, keysOnly)
+}
+
+func (b *lockedBackend) Create(ctx context.Context, key string, value []byte, lease int64) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Create(ctx, key, value, lease)
+}
+
+func (b *lockedBackend) Delete(
+	ctx context.Context, key string, revision int64,
+) (int64, *server.KeyValue, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Delete(ctx, key, revision)
+}
+
+func (b *lockedBackend) List(
+	ctx context.Context, key, end string, limit, revision int64, keysOnly bool,
+) (int64, []*server.KeyValue, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.List(ctx, key, end, limit, revision, keysOnly)
+}
+
+// ListStream drains the stream under the lock: kine's iterator reads the live
+// store, so it must not outlive the window in which no write can happen.
+func (b *lockedBackend) ListStream(
+	ctx context.Context, key, end string, limit, revision int64, keysOnly bool,
+) server.ListResult {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	res := b.Backend.ListStream(ctx, key, end, limit, revision, keysOnly)
+
+	var (
+		kvs []*server.KeyValue
+		err error
+	)
+
+	for batch := range res.KVc {
+		kvs = append(kvs, batch)
+	}
+
+	for e := range res.Errorc {
+		err = e
+	}
+
+	out := make(chan *server.KeyValue, len(kvs)+1)
+	errc := make(chan error, 1)
+
+	for _, kv := range kvs {
+		out <- kv
+	}
+	close(out)
+
+	if err != nil {
+		errc <- err
+	}
+	close(errc)
+
+	return server.ListResult{KVc: out, Errorc: errc, CurrentRevision: res.CurrentRevision}
+}
+
+func (b *lockedBackend) Count(ctx context.Context, key, end string, revision int64) (int64, int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Count(ctx, key, end, revision)
+}
+
+func (b *lockedBackend) Update(
+	ctx context.Context, key string, value []byte, revision, lease int64,
+) (int64, *server.KeyValue, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Update(ctx, key, value, revision, lease)
+}
+
+//nolint:staticcheck // kine's Backend interface names it DbSize.
+func (b *lockedBackend) DbSize(ctx context.Context) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.DbSize(ctx)
+}
+
+func (b *lockedBackend) CurrentRevision(ctx context.Context) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.CurrentRevision(ctx)
+}
+
+func (b *lockedBackend) Compact(ctx context.Context, revision int64) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.Backend.Compact(ctx, revision)
+}
 
 // clippedBackend works around a kine data race: the memory driver broadcasts
 // one EventBatch to every watcher, and kine's watch loop appends queued events

@@ -2,6 +2,7 @@ package petri
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -69,4 +70,53 @@ func TestClippedBackendDrainsSourceAfterCancel(t *testing.T) {
 	}
 
 	close(src)
+}
+
+// fakeListStreamBackend serves one prepared ListStream result; every other
+// Backend method is unused and panics through the nil embedded interface.
+type fakeListStreamBackend struct {
+	server.Backend
+
+	result server.ListResult
+}
+
+func (f fakeListStreamBackend) ListStream(context.Context, string, string, int64, int64, bool) server.ListResult {
+	return f.result
+}
+
+func TestLockedBackendListStreamKeepsOrderRevisionAndErrors(t *testing.T) {
+	t.Parallel()
+
+	kvs := []*server.KeyValue{{Key: "a"}, {Key: "b"}, {Key: "c"}}
+
+	kvc := make(chan *server.KeyValue, len(kvs))
+	for _, kv := range kvs {
+		kvc <- kv
+	}
+	close(kvc)
+
+	errc := make(chan error, 1)
+	errc <- server.ErrCompacted
+	close(errc)
+
+	res := (&lockedBackend{
+		Backend: fakeListStreamBackend{result: server.ListResult{KVc: kvc, Errorc: errc, CurrentRevision: 9}},
+	}).ListStream(t.Context(), "", "", 0, 0, false)
+
+	if res.CurrentRevision != 9 {
+		t.Errorf("CurrentRevision = %d, want 9", res.CurrentRevision)
+	}
+
+	var got []string
+	for kv := range res.KVc {
+		got = append(got, kv.Key)
+	}
+
+	if len(got) != 3 || got[0] != "a" || got[2] != "c" {
+		t.Errorf("keys = %v, want a, b, c in order", got)
+	}
+
+	if err := <-res.Errorc; !errors.Is(err, server.ErrCompacted) {
+		t.Errorf("error = %v, want ErrCompacted", err)
+	}
 }

@@ -22,6 +22,10 @@ const (
 	manifestName = "MIRROR.json"
 	// modModEnv lets the scratch module resolve and update its go.mod freely.
 	modModEnv = "GOFLAGS=-mod=mod"
+	// autoToolchainEnv lets go commands on the upstreams switch to a newer
+	// toolchain when one of them needs it: kine often declares a newer Go
+	// than petri's floor, and CI's setup-go pins GOTOOLCHAIN=local.
+	autoToolchainEnv = "GOTOOLCHAIN=auto"
 )
 
 // source is one upstream module mirrored into the repository: its packages
@@ -73,6 +77,7 @@ var (
 type downloadedModule struct {
 	Dir   string `json:"Dir"`
 	GoMod string `json:"GoMod"`
+	Error string `json:"Error"`
 }
 
 type listedModule struct {
@@ -232,7 +237,7 @@ func resolve(
 		return nil, "", fmt.Errorf("write work main.go: %w", err)
 	}
 
-	if _, err = goCmd(ctx, work, []string{modModEnv}, "mod", "tidy"); err != nil {
+	if _, err = scratchCmd(ctx, work, []string{modModEnv}, "mod", "tidy"); err != nil {
 		return nil, "", err
 	}
 
@@ -240,14 +245,20 @@ func resolve(
 }
 
 func download(ctx context.Context, work, module string, v version) (downloadedModule, error) {
-	out, err := goCmd(ctx, work, nil, "mod", "download", "-json", module+"@"+v.String())
-	if err != nil {
-		return downloadedModule{}, err
+	out, err := scratchCmd(ctx, work, nil, "mod", "download", "-json", module+"@"+v.String())
+
+	// go mod download -json reports its failures in the output, not on stderr.
+	var mod downloadedModule
+	if jsonErr := json.Unmarshal(out, &mod); jsonErr != nil {
+		return downloadedModule{}, errors.Join(err, fmt.Errorf("decode go mod download output: %w", jsonErr))
 	}
 
-	var mod downloadedModule
-	if err = json.Unmarshal(out, &mod); err != nil {
-		return downloadedModule{}, fmt.Errorf("decode go mod download output: %w", err)
+	if mod.Error != "" {
+		return downloadedModule{}, fmt.Errorf("download %s@%s: %s", module, v, mod.Error)
+	}
+
+	if err != nil {
+		return downloadedModule{}, err
 	}
 
 	return mod, nil
@@ -417,7 +428,7 @@ func restoreRetired(retired, live string) error {
 // go directive is deliberately not carried over: petri should demand no newer
 // Go than Kubernetes does.
 func pinGoMod(ctx context.Context, repo, work, upstreamGo string) error {
-	out, err := goCmd(ctx, work, []string{modModEnv}, "list", "-m", "-json", "all")
+	out, err := scratchCmd(ctx, work, []string{modModEnv}, "list", "-m", "-json", "all")
 	if err != nil {
 		return err
 	}
@@ -528,7 +539,14 @@ func restoreFiles(dir string, saved map[string][]byte) error {
 	return errors.Join(errs...)
 }
 
-// goCmd runs the go command in dir with GOWORK=off plus env, returning stdout.
+// scratchCmd runs the go command in the scratch module, which may need a newer
+// toolchain than the one running: see autoToolchainEnv.
+func scratchCmd(ctx context.Context, work string, env []string, args ...string) ([]byte, error) {
+	return goCmd(ctx, work, append(slices.Clone(env), autoToolchainEnv), args...)
+}
+
+// goCmd runs the go command in dir with GOWORK=off plus env, returning stdout,
+// even on failure.
 func goCmd(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
@@ -540,7 +558,7 @@ func goCmd(ctx context.Context, dir string, env []string, args ...string) ([]byt
 
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go %s (in %s): %w\n%s", strings.Join(args, " "), dir, err, stderr.String())
+		return out, fmt.Errorf("go %s (in %s): %w\n%s", strings.Join(args, " "), dir, err, stderr.String())
 	}
 
 	return out, nil

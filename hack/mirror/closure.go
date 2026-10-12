@@ -94,7 +94,7 @@ func closure(ctx context.Context, work string, roots []string) (map[string]map[s
 		for _, cgo := range []string{"0", "1"} {
 			env := []string{"GOOS=" + p.goos, "GOARCH=" + p.goarch, "CGO_ENABLED=" + cgo, modModEnv}
 
-			out, err := goCmd(ctx, work, env, append([]string{"list", "-deps", "-json"}, roots...)...)
+			out, err := scratchCmd(ctx, work, env, append([]string{"list", "-deps", "-json"}, roots...)...)
 			if err != nil {
 				return nil, err
 			}

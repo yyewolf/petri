@@ -74,6 +74,9 @@ type Manager struct {
 	// touching the constructors.
 	buildMu sync.Mutex
 	build   *buildGate
+	// buildSyncs collects the afterSync waits of the build in flight, under
+	// buildMu like build.
+	buildSyncs []func(context.Context) error
 
 	mu     sync.Mutex
 	specs  map[string]*Spec
@@ -82,6 +85,9 @@ type Manager struct {
 	// the lock afterwards refuses to start anything the Wait below could
 	// miss.
 	stopped bool
+	// stopHooks release what controllers started outside the shared
+	// factories; Stop runs them once everything else has exited.
+	stopHooks []func()
 
 	// serviceAccountSigningKey is the private key the API server signs
 	// service-account tokens with, shared through WithServiceAccountSigningKey
@@ -185,6 +191,32 @@ func (m *Manager) Stop() {
 	m.metaFactory.Shutdown()
 
 	m.wg.Wait()
+
+	m.mu.Lock()
+	hooks := m.stopHooks
+	m.stopHooks = nil
+	m.mu.Unlock()
+
+	for _, hook := range hooks {
+		hook()
+	}
+}
+
+// afterSync makes the build in flight wait for more than the shared
+// factories: Enable returns only once fn, run after the shared informers
+// synced, returns nil. Controllers with informer factories of their own start
+// and sync them in fn. Only Build functions may call it.
+func (m *Manager) afterSync(fn func(context.Context) error) {
+	m.buildSyncs = append(m.buildSyncs, fn)
+}
+
+// onStop registers fn to run when Stop has cancelled the manager and every
+// controller has returned, for what a controller started outside the shared
+// factories. It runs even when the controller never got to run.
+func (m *Manager) onStop(fn func()) {
+	m.mu.Lock()
+	m.stopHooks = append(m.stopHooks, fn)
+	m.mu.Unlock()
 }
 
 // KubeClient returns an admin clientset for the named controller, stamped

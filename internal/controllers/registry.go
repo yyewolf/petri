@@ -161,6 +161,7 @@ func (m *Manager) buildAndStart(spec *Spec) (Run, error) {
 	m.buildMu.Lock()
 	gate := newBuildGate()
 	m.build = gate
+	m.buildSyncs = nil
 
 	run, err := spec.Build(m.ctx, m)
 	if err == nil {
@@ -169,7 +170,9 @@ func (m *Manager) buildAndStart(spec *Spec) (Run, error) {
 		err = gate.flush()
 	}
 
+	syncs := m.buildSyncs
 	m.build = nil
+	m.buildSyncs = nil
 	m.buildMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("petri: build %s controller: %w", spec.Name, err)
@@ -187,6 +190,12 @@ func (m *Manager) buildAndStart(spec *Spec) (Run, error) {
 	err = m.waitForSync()
 	if err != nil {
 		return nil, fmt.Errorf("petri: %s controller informers: %w", spec.Name, err)
+	}
+
+	for _, sync := range syncs {
+		if err = sync(m.ctx); err != nil {
+			return nil, fmt.Errorf("petri: %s controller informers: %w", spec.Name, err)
+		}
 	}
 
 	// A Stop that raced the start shut the factories down before their

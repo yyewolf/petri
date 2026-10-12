@@ -20,6 +20,9 @@
 // garbage-collection behaviour — the namespace waits for the stuck object —
 // not a petri bug. Remove the finalizer in the test's cleanup, or start the
 // environment with DisableDefaultControllers for strict envtest parity.
+//
+// The other petri controllers, the workload controllers among them, can be
+// enabled on the environment with EnableControllers.
 package envtest
 
 import (
@@ -29,6 +32,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"testing"
 	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -179,6 +183,27 @@ func (e *Environment) Stop() error {
 	}
 
 	return e.release()
+}
+
+// EnableControllers enables petri's built-in controllers on the environment's
+// control plane, like ControlPlane.EnableControllers on a plane the suite
+// owns. It exists because Start hands out only a rest.Config: without it, a
+// drop-in suite could never reach petri's workload controllers. It fails the
+// test when the environment is not running.
+func (e *Environment) EnableControllers(t testing.TB, cs ...petri.Controller) {
+	t.Helper()
+
+	e.mu.Lock()
+	cp := e.cp
+	e.mu.Unlock()
+
+	if cp == nil {
+		t.Fatal("petri envtest: enable controllers before Start or after Stop")
+
+		return
+	}
+
+	cp.EnableControllers(t, cs...)
 }
 
 // release stops the control plane and undoes everything Start set up. The

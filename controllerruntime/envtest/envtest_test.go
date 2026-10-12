@@ -2,6 +2,7 @@ package envtest_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -367,6 +369,113 @@ func TestDisableDefaultControllersMatchesEnvtest(t *testing.T) {
 
 	if _, getErr := cs.CoreV1().ConfigMaps(ns).Get(ctx, "dependent", metav1.GetOptions{}); getErr != nil {
 		t.Fatalf("dependent was garbage collected with the controllers off: %v", getErr)
+	}
+}
+
+// TestEnableControllersRunsWorkloadControllers proves the drop-in's enabling
+// path reaches petri's controllers: after enabling the Deployment controller, a
+// Deployment gets its ReplicaSet. The controller behaviours themselves are
+// tested in the core module, so the test stops at the first reaction.
+func TestEnableControllersRunsWorkloadControllers(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+
+	env := &envtest.Environment{}
+	cfg, err := env.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = env.Stop() })
+
+	env.EnableControllers(t, petri.DeploymentController)
+
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("build client: %v", err)
+	}
+
+	ns := createNamespaceForTest(ctx, t, cs, "dropin-enable")
+
+	labels := map[string]string{"app": "web"}
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: new(int32(1)),
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "web", Image: "nginx:1.0"}},
+				},
+			},
+		},
+	}
+	if dep, err = cs.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create deployment: %v", err)
+	}
+
+	// The controller names the ReplicaSet itself, so the wait matches on the
+	// owner UID instead of a name.
+	petri.Retry(t, func(context.Context) (bool, error) {
+		list, listErr := cs.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{})
+		if listErr != nil {
+			return false, listErr
+		}
+
+		for i := range list.Items {
+			if ref := metav1.GetControllerOf(&list.Items[i]); ref != nil && ref.UID == dep.UID {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	})
+}
+
+// fatalTB is a [testing.TB] stand-in that records Fatal calls instead of ending
+// the test, so EnableControllers's failure path is observable. Only Helper and
+// Fatal are called on the paths under test; every other method is unused and
+// panics through the nil embedded interface.
+type fatalTB struct {
+	testing.TB
+
+	fatals []string
+}
+
+func (f *fatalTB) Helper() {}
+
+func (f *fatalTB) Fatal(args ...any) {
+	f.fatals = append(f.fatals, fmt.Sprint(args...))
+}
+
+// TestEnableControllersRequiresARunningEnvironment checks that enabling before
+// Start or after Stop fails the suite's test instead of dereferencing a control
+// plane that is not there.
+func TestEnableControllersRequiresARunningEnvironment(t *testing.T) {
+	t.Parallel()
+
+	env := &envtest.Environment{}
+
+	tb := &fatalTB{}
+	env.EnableControllers(tb, petri.DeploymentController)
+	if len(tb.fatals) == 0 || !strings.Contains(tb.fatals[0], "before Start") {
+		t.Errorf("EnableControllers before Start did not fail the test: %v", tb.fatals)
+	}
+
+	if _, err := env.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = env.Stop() })
+	if err := env.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	tb = &fatalTB{}
+	env.EnableControllers(tb, petri.DeploymentController)
+	if len(tb.fatals) == 0 || !strings.Contains(tb.fatals[0], "after Stop") {
+		t.Errorf("EnableControllers after Stop did not fail the test: %v", tb.fatals)
 	}
 }
 

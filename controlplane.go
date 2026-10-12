@@ -68,8 +68,8 @@ type Option func(*startOptions)
 // with the defaults, a deleted namespace really goes away and ownerReferences
 // cascade.
 //
-// The shared control plane (Start) and the envtest drop-in always run the
-// defaults.
+// The shared control plane (Start) always runs the defaults; the envtest
+// drop-in runs them too, unless its environment opts out.
 func WithoutDefaultControllers() Option {
 	return func(o *startOptions) { o.defaultControllers = false }
 }

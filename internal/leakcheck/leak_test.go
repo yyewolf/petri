@@ -38,6 +38,7 @@ const (
 	maxDumpBytes   = 20000
 )
 
+//nolint:tparallel // The node cycles' subtests must finish, cleanups included, before the count.
 func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +92,122 @@ func TestRepeatedNewAndStopDoNotLeakGoroutines(t *testing.T) {
 		t.Fatalf("%d goroutines after %d full-set cycles, want at most %d (baseline %d + %d)\n%s",
 			n, cycles, baseline+slack, baseline, slack, goroutineDump())
 	}
+
+	// Nodes with Pods running on them, placed by kube-scheduler on one plane
+	// and by Pod expectations on another: the scheduler's own informer
+	// factories and event broadcaster, the kubelet simulator and the Pod
+	// dispatcher with its actions must all release with the plane. Each
+	// cycle runs in a subtest so the cleanups the helpers register run
+	// before the count.
+	for range cycles { //nolint:paralleltest // Sequential: the count needs every cycle done.
+		t.Run("scheduler", schedulerCycle)
+		t.Run("expectations", expectationsCycle)
+	}
+
+	if n := waitAtMost(t, baseline+slack); n > baseline+slack {
+		t.Fatalf("%d goroutines after %d node cycles, want at most %d (baseline %d + %d)\n%s",
+			n, cycles, baseline+slack, baseline, slack, goroutineDump())
+	}
+}
+
+// schedulerCycle runs a ReplicaSet on a Node through kube-scheduler and
+// stops the plane with its Pods running.
+func schedulerCycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), startTimeout)
+	defer cancel()
+
+	cp, err := petri.New(ctx)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = cp.Stop() })
+
+	cp.EnableControllers(t, petri.SchedulerController, petri.ReplicaSetController)
+	cp.AddNode(t, petri.NodeOptions{})
+
+	ns, err := cp.NewNamespace(ctx)
+	if err != nil {
+		t.Fatalf("NewNamespace: %v", err)
+	}
+
+	cs := cp.Client()
+	labels := map[string]string{"app": "churn"}
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "churn"},
+		Spec: appsv1.ReplicaSetSpec{
+			Replicas: new(int32(2)),
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web", Image: "nginx:1.0"}}},
+			},
+		},
+	}
+	if _, err = cs.AppsV1().ReplicaSets(ns).Create(ctx, rs, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create replicaset: %v", err)
+	}
+
+	petri.WaitFor(t, cs.AppsV1().ReplicaSets(ns), "churn", func(rs *appsv1.ReplicaSet) (bool, error) {
+		return rs.Status.ReadyReplicas == 2, nil
+	})
+
+	if err = cp.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
+
+// expectationsCycle places Pods with an expectation and ExpectPod, and stops
+// the plane with an ExpectPod still waiting on a Pod that never comes.
+func expectationsCycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), startTimeout)
+	defer cancel()
+
+	cp, err := petri.New(ctx)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = cp.Stop() })
+
+	node := cp.AddNode(t, petri.NodeOptions{})
+
+	ns, err := cp.NewNamespace(ctx)
+	if err != nil {
+		t.Fatalf("NewNamespace: %v", err)
+	}
+
+	cs := cp.Client()
+	expectation := cp.ExpectPods(t, petri.InNamespace(ns)).Times(2).BindTo(node)
+
+	for _, name := range []string{"a", "b"} {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:1.0"}}},
+		}
+		if _, err = cs.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod: %v", err)
+		}
+	}
+
+	expectation.Wait(t)
+
+	for _, name := range []string{"a", "b"} {
+		petri.WaitFor(t, cs.CoreV1().Pods(ns), name,
+			petri.StatusCondition[*corev1.Pod]("Ready", metav1.ConditionTrue))
+	}
+
+	waiting := make(chan struct{})
+
+	go func() {
+		defer close(waiting)
+
+		_, _ = cp.ExpectPodCtx(context.Background(), petri.InNamespace("nowhere"))
+	}()
+
+	if err = cp.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	<-waiting
 }
 
 // cycle starts and stops one control plane running its default controllers,

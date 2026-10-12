@@ -1,0 +1,165 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"errors"
+
+	"github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+)
+
+// explicit interface check
+var _ etcdserverpb.KVServer = (*KVServerBridge)(nil)
+
+func (k *KVServerBridge) Range(ctx context.Context, r *etcdserverpb.RangeRequest) (*etcdserverpb.RangeResponse, error) {
+	if r.MaxCreateRevision != 0 {
+		return nil, unsupported("maxCreateRevision")
+	}
+
+	if r.SortOrder != 0 {
+		return nil, unsupported("sortOrder")
+	}
+
+	if r.SortTarget != 0 {
+		return nil, unsupported("sortTarget")
+	}
+
+	if r.Serializable {
+		return nil, unsupported("serializable")
+	}
+
+	if r.MinModRevision != 0 {
+		return nil, unsupported("minModRevision")
+	}
+
+	if r.MinCreateRevision != 0 {
+		return nil, unsupported("minCreateRevision")
+	}
+
+	if r.MaxCreateRevision != 0 {
+		return nil, unsupported("maxCreateRevision")
+	}
+
+	if r.MaxModRevision != 0 {
+		return nil, unsupported("maxModRevision")
+	}
+
+	resp, err := k.limited.Range(ctx, r)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			logrus.Errorf("error while range on %s %s: %v", r.Key, r.RangeEnd, err)
+		}
+		return nil, err
+	}
+
+	rangeResponse := &etcdserverpb.RangeResponse{
+		More:   resp.More,
+		Count:  resp.Count,
+		Header: resp.Header,
+		Kvs:    toKVs(resp.Kvs...),
+	}
+
+	return rangeResponse, nil
+}
+
+func (k *KVServerBridge) RangeStream(r *etcdserverpb.RangeRequest, rs etcdserverpb.KV_RangeStreamServer) error {
+	if r.MaxCreateRevision != 0 {
+		return unsupported("maxCreateRevision")
+	}
+
+	if r.SortOrder != 0 {
+		return unsupported("sortOrder")
+	}
+
+	if r.SortTarget != 0 {
+		return unsupported("sortTarget")
+	}
+
+	if r.Serializable {
+		return unsupported("serializable")
+	}
+
+	if r.MinModRevision != 0 {
+		return unsupported("minModRevision")
+	}
+
+	if r.MinCreateRevision != 0 {
+		return unsupported("minCreateRevision")
+	}
+
+	if r.MaxCreateRevision != 0 {
+		return unsupported("maxCreateRevision")
+	}
+
+	if r.MaxModRevision != 0 {
+		return unsupported("maxModRevision")
+	}
+
+	return k.limited.RangeStream(r, rs)
+}
+
+func toKVs(kvs ...*KeyValue) []*mvccpb.KeyValue {
+	if len(kvs) == 0 || kvs[0] == nil {
+		return nil
+	}
+
+	ret := make([]*mvccpb.KeyValue, 0, len(kvs))
+	for _, kv := range kvs {
+		newKV := toKV(kv)
+		if newKV != nil {
+			ret = append(ret, newKV)
+		}
+	}
+	return ret
+}
+
+func toKV(kv *KeyValue) *mvccpb.KeyValue {
+	if kv == nil {
+		return nil
+	}
+	ret := &mvccpb.KeyValue{
+		Key:            []byte(kv.Key),
+		Value:          kv.Value,
+		Version:        kv.Version,
+		Lease:          kv.Lease,
+		CreateRevision: kv.CreateRevision,
+		ModRevision:    kv.ModRevision,
+	}
+	// fix up apiserver watch with correct compact revision key,
+	// version, and value
+	if bytes.Equal(ret.Key, compactRevAPI) {
+		ret.Key = compactRevKey
+		ret.Version, ret.Value = DecodeVersion(kv.Value)
+	}
+	return ret
+}
+
+func (k *KVServerBridge) Put(ctx context.Context, r *etcdserverpb.PutRequest) (*etcdserverpb.PutResponse, error) {
+	res, err := k.limited.Put(ctx, r)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logrus.Errorf("error in put %s: %v", r, err)
+	}
+	return res, err
+}
+
+func (k *KVServerBridge) DeleteRange(ctx context.Context, r *etcdserverpb.DeleteRangeRequest) (*etcdserverpb.DeleteRangeResponse, error) {
+	return nil, unsupported("delete")
+}
+
+func (k *KVServerBridge) Txn(ctx context.Context, r *etcdserverpb.TxnRequest) (*etcdserverpb.TxnResponse, error) {
+	res, err := k.limited.Txn(ctx, r)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logrus.Errorf("error in txn %s: %v", r, err)
+	}
+	return res, err
+}
+
+func (k *KVServerBridge) Compact(ctx context.Context, r *etcdserverpb.CompactionRequest) (*etcdserverpb.CompactionResponse, error) {
+	res, err := k.limited.Compact(ctx, r)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logrus.Errorf("error in compact %s: %v", r, err)
+	}
+	return res, err
+}

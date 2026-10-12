@@ -1,0 +1,48 @@
+package server
+
+import (
+	"time"
+
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
+)
+
+type KVServerBridge struct {
+	emulatedETCDVersion string
+	limited             *LimitedServer
+
+	// we want compile errors if new methods are added
+	etcdserverpb.UnsafeLeaseServer
+	etcdserverpb.UnsafeWatchServer
+	etcdserverpb.UnsafeKVServer
+	etcdserverpb.UnsafeClusterServer
+	etcdserverpb.UnsafeMaintenanceServer
+}
+
+func New(backend Backend, scheme string, notifyInterval time.Duration, emulatedETCDVersion string) *KVServerBridge {
+	return &KVServerBridge{
+		emulatedETCDVersion: emulatedETCDVersion,
+		limited: &LimitedServer{
+			notifyInterval: notifyInterval,
+			backend:        backend,
+			scheme:         scheme,
+		},
+	}
+}
+
+func (k *KVServerBridge) Register(server *grpc.Server) {
+	etcdserverpb.RegisterLeaseServer(server, k)
+	etcdserverpb.RegisterWatchServer(server, k)
+	etcdserverpb.RegisterKVServer(server, k)
+	etcdserverpb.RegisterClusterServer(server, k)
+	etcdserverpb.RegisterMaintenanceServer(server, k)
+
+	hsrv := health.NewServer()
+	hsrv.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(server, hsrv)
+
+	reflection.Register(server)
+}

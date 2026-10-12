@@ -1,5 +1,6 @@
 // Command mirror regenerates internal/kubernetes from upstream k8s.io/kubernetes
-// and plans automated mirror updates.
+// and internal/kine from github.com/k3s-io/kine, and plans automated mirror
+// updates.
 package main
 
 import (

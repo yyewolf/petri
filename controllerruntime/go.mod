@@ -1,6 +1,6 @@
 module github.com/yyewolf/petri/controllerruntime
 
-go 1.26.5
+go 1.26.0
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

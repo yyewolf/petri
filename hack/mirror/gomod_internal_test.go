@@ -51,9 +51,15 @@ func TestParseUpstreamGoModRequiresGoDirective(t *testing.T) {
 func TestRenderWorkGoMod(t *testing.T) {
 	t.Parallel()
 
-	got := string(renderWorkGoMod("1.26.0", "v1.37.1", []string{"k8s.io/api", "k8s.io/client-go"}, "v0.37.1"))
+	got := string(renderWorkGoMod(
+		"1.26.5",
+		[]string{"k8s.io/kubernetes v1.37.1", "github.com/k3s-io/kine v0.17.2"},
+		[]string{"k8s.io/api", "k8s.io/client-go"},
+		"v0.37.1",
+	))
 
-	const want = "module petrimirror\n\ngo 1.26.0\n\nrequire k8s.io/kubernetes v1.37.1\n\nreplace (\n" +
+	const want = "module petrimirror\n\ngo 1.26.5\n\nrequire (\n" +
+		"\tk8s.io/kubernetes v1.37.1\n\tgithub.com/k3s-io/kine v0.17.2\n)\n\nreplace (\n" +
 		"\tk8s.io/api => k8s.io/api v0.37.1\n\tk8s.io/client-go => k8s.io/client-go v0.37.1\n)\n"
 	if got != want {
 		t.Errorf("renderWorkGoMod =\n%s\nwant\n%s", got, want)

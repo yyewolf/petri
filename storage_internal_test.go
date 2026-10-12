@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k3s-io/kine/pkg/server"
+	"github.com/yyewolf/petri/internal/kine/pkg/server"
 )
 
 // fakeWatchBackend serves one prepared Watch result; every other Backend

@@ -14,8 +14,9 @@ var (
 	stagingPattern     = regexp.MustCompile(`^(?:replace\s+)?(\S+)\s+=>\s+\./staging/src/\S+\s*$`)
 )
 
-// parseUpstreamGoMod returns the go directive of k8s.io/kubernetes's go.mod and
-// the modules it replaces with ./staging/src directories, in file order.
+// parseUpstreamGoMod returns the go directive of an upstream go.mod and the
+// modules it replaces with ./staging/src directories, in file order (only
+// k8s.io/kubernetes has any).
 func parseUpstreamGoMod(data []byte) (string, []string, error) {
 	var (
 		goVersion string
@@ -45,18 +46,19 @@ func parseUpstreamGoMod(data []byte) (string, []string, error) {
 	return goVersion, staging, nil
 }
 
-// renderWorkGoMod writes the go.mod of the scratch module that resolves
-// k8s.io/kubernetes with every staging module pinned to its published version.
-func renderWorkGoMod(goVersion, kubeVersion string, staging []string, stagingVersion string) []byte {
+// renderWorkGoMod writes the go.mod of the scratch module that requires the
+// mirrored upstreams ("path version" each) with every Kubernetes staging module
+// pinned to its published version.
+func renderWorkGoMod(goVersion string, require, staging []string, stagingVersion string) []byte {
 	var b strings.Builder
 
-	fmt.Fprintf(
-		&b,
-		"module petrimirror\n\ngo %s\n\nrequire %s %s\n\nreplace (\n",
-		goVersion,
-		upstreamModule,
-		kubeVersion,
-	)
+	fmt.Fprintf(&b, "module petrimirror\n\ngo %s\n\nrequire (\n", goVersion)
+
+	for _, r := range require {
+		fmt.Fprintf(&b, "\t%s\n", r)
+	}
+
+	b.WriteString(")\n\nreplace (\n")
 
 	for _, mod := range staging {
 		fmt.Fprintf(&b, "\t%s => %s %s\n", mod, mod, stagingVersion)

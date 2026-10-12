@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,19 +13,50 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 const (
-	upstreamModule = "k8s.io/kubernetes"
-	mirrorModule   = "github.com/yyewolf/petri/internal/kubernetes"
-	mirrorDir      = "internal/kubernetes"
-	manifestName   = "MIRROR.json"
-	stagedDir      = "internal/.kubernetes-new"
-	retiredDir     = "internal/.kubernetes-old"
+	petriModule  = "github.com/yyewolf/petri"
+	manifestName = "MIRROR.json"
 	// modModEnv lets the scratch module resolve and update its go.mod freely.
 	modModEnv = "GOFLAGS=-mod=mod"
 )
+
+// source is one upstream module mirrored into the repository: its packages
+// needed by the roots in dir/MIRROR.json, with imports rewritten under dir.
+type source struct {
+	name   string // names the staging directories
+	module string // upstream module path
+	dir    string // mirror directory, relative to the repository root
+}
+
+//nolint:gochecknoglobals // fixed configuration.
+var (
+	kubeSource = source{name: "kubernetes", module: "k8s.io/kubernetes", dir: "internal/kubernetes"}
+	kineSource = source{name: "kine", module: "github.com/k3s-io/kine", dir: "internal/kine"}
+	sources    = []source{kubeSource, kineSource}
+)
+
+func (s source) mirrorModule() string { return petriModule + "/" + s.dir }
+
+func (s source) manifestPath(repo string) string {
+	return filepath.Join(repo, filepath.FromSlash(s.dir), manifestName)
+}
+
+func (s source) stagedDir(repo string) string {
+	return filepath.Join(repo, "internal", "."+s.name+"-new")
+}
+
+func (s source) retiredDir(repo string) string {
+	return filepath.Join(repo, "internal", "."+s.name+"-old")
+}
+
+// mirrored reports whether module is one of the mirrored upstreams.
+func mirrored(module string) bool {
+	return slices.ContainsFunc(sources, func(s source) bool { return s.module == module })
+}
 
 var (
 	kubeVersionLine = regexp.MustCompile(`(?m)^const KubernetesVersion = "1\.\d+"$`)
@@ -43,21 +75,28 @@ type listedModule struct {
 	Replace *listedModule `json:"Replace"`
 }
 
-// runSync regenerates internal/kubernetes for Kubernetes version ver (or the
-// version MIRROR.json records when ver is empty) and pins go.mod to match.
-func runSync(ctx context.Context, repo, ver string) error {
-	m, err := readManifest(filepath.Join(repo, mirrorDir, manifestName))
+// runSync regenerates internal/kubernetes and internal/kine for Kubernetes
+// version kubeVer and kine version kineVer (each defaulting to the version its
+// MIRROR.json records) and pins go.mod to match.
+func runSync(ctx context.Context, repo, kubeVer, kineVer string) error {
+	kubeManifest, err := readManifest(kubeSource.manifestPath(repo))
 	if err != nil {
 		return err
 	}
 
-	if ver == "" {
-		ver = m.Kubernetes
+	kineManifest, err := readManifest(kineSource.manifestPath(repo))
+	if err != nil {
+		return err
 	}
 
-	v, ok := parseVersion(ver)
-	if !ok || !v.stable() || v.Major != 1 {
-		return fmt.Errorf("invalid Kubernetes version %q: want a stable v1.N.P", ver)
+	kube, err := pickVersion(kubeVer, kubeManifest.Kubernetes, 1)
+	if err != nil {
+		return fmt.Errorf("invalid Kubernetes version: %w", err)
+	}
+
+	kine, err := pickVersion(kineVer, kineManifest.Kine, 0)
+	if err != nil {
+		return fmt.Errorf("invalid kine version: %w", err)
 	}
 
 	work, err := os.MkdirTemp("", "petri-mirror-")
@@ -66,26 +105,34 @@ func runSync(ctx context.Context, repo, ver string) error {
 	}
 	defer os.RemoveAll(work)
 
-	upstream, upstreamGo, err := resolve(ctx, work, v, m.Roots)
+	roots := slices.Concat(kubeManifest.Roots, kineManifest.Roots)
+
+	upstream, kubeGo, err := resolve(ctx, work, kube, kine, roots)
 	if err != nil {
 		return err
 	}
 
-	pkgs, err := closure(ctx, work, m.Roots)
+	pkgs, err := closure(ctx, work, roots)
 	if err != nil {
 		return err
 	}
 
-	staged := filepath.Join(repo, stagedDir)
-	if err = writeTree(staged, upstream.Dir, pkgs, manifest{Kubernetes: v.String(), Roots: m.Roots}); err != nil {
+	staged := map[source]manifest{
+		kubeSource: {Kubernetes: kube.String(), Roots: kubeManifest.Roots},
+		kineSource: {Kine: kine.String(), Roots: kineManifest.Roots},
+	}
+
+	for _, src := range sources {
+		if err = writeTree(src.stagedDir(repo), src, upstream[src.module], pkgs[src.module], staged[src]); err != nil {
+			return err
+		}
+	}
+
+	if err = swapAndPin(ctx, repo, work, kubeGo); err != nil {
 		return err
 	}
 
-	if err = swapAndPin(ctx, repo, work, upstreamGo); err != nil {
-		return err
-	}
-
-	if err = setKubernetesVersion(filepath.Join(repo, "version.go"), v.Minor); err != nil {
+	if err = setKubernetesVersion(filepath.Join(repo, "version.go"), kube.Minor); err != nil {
 		return err
 	}
 
@@ -96,34 +143,68 @@ func runSync(ctx context.Context, repo, ver string) error {
 	return nil
 }
 
-// resolve creates the scratch module in work and returns the downloaded
-// upstream module and its go directive.
-func resolve(ctx context.Context, work string, v version, roots []string) (downloadedModule, string, error) {
-	out, err := goCmd(ctx, work, nil, "mod", "download", "-json", upstreamModule+"@"+v.String())
+// pickVersion parses requested, or recorded when requested is empty, and
+// requires a stable release with the given major version.
+func pickVersion(requested, recorded string, major int) (version, error) {
+	s := cmp.Or(requested, recorded)
+
+	v, ok := parseVersion(s)
+	if !ok || !v.stable() || v.Major != major {
+		return version{}, fmt.Errorf("%q: want a stable v%d.N.P", s, major)
+	}
+
+	return v, nil
+}
+
+// resolve creates the scratch module in work, requiring Kubernetes and kine
+// together so one version selection covers both, and returns each downloaded
+// upstream module by path plus Kubernetes's go directive.
+func resolve(
+	ctx context.Context, work string, kube, kine version, roots []string,
+) (map[string]downloadedModule, string, error) {
+	kubeMod, err := download(ctx, work, kubeSource.module, kube)
 	if err != nil {
-		return downloadedModule{}, "", err
+		return nil, "", err
 	}
 
-	var upstream downloadedModule
-	if err = json.Unmarshal(out, &upstream); err != nil {
-		return downloadedModule{}, "", fmt.Errorf("decode go mod download output: %w", err)
-	}
-
-	raw, err := os.ReadFile(upstream.GoMod)
+	kineMod, err := download(ctx, work, kineSource.module, kine)
 	if err != nil {
-		return downloadedModule{}, "", fmt.Errorf("read upstream go.mod: %w", err)
+		return nil, "", err
 	}
 
-	upstreamGo, staging, err := parseUpstreamGoMod(raw)
+	raw, err := os.ReadFile(kubeMod.GoMod)
 	if err != nil {
-		return downloadedModule{}, "", err
+		return nil, "", fmt.Errorf("read upstream go.mod: %w", err)
 	}
 
-	stagingVersion := fmt.Sprintf("v0.%d.%d", v.Minor, v.Patch)
+	kubeGo, staging, err := parseUpstreamGoMod(raw)
+	if err != nil {
+		return nil, "", err
+	}
 
-	goMod := renderWorkGoMod(upstreamGo, v.String(), staging, stagingVersion)
+	raw, err = os.ReadFile(kineMod.GoMod)
+	if err != nil {
+		return nil, "", fmt.Errorf("read kine go.mod: %w", err)
+	}
+
+	kineGo, _, err := parseUpstreamGoMod(raw)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// The scratch module must satisfy both upstreams; only Kubernetes's
+	// directive is carried over to petri's go.mod.
+	workGo := kubeGo
+	if goVersionLess(workGo, kineGo) {
+		workGo = kineGo
+	}
+
+	stagingVersion := fmt.Sprintf("v0.%d.%d", kube.Minor, kube.Patch)
+	require := []string{kubeSource.module + " " + kube.String(), kineSource.module + " " + kine.String()}
+
+	goMod := renderWorkGoMod(workGo, require, staging, stagingVersion)
 	if err = os.WriteFile(filepath.Join(work, "go.mod"), goMod, 0o600); err != nil {
-		return downloadedModule{}, "", fmt.Errorf("write work go.mod: %w", err)
+		return nil, "", fmt.Errorf("write work go.mod: %w", err)
 	}
 
 	var main strings.Builder
@@ -137,46 +218,49 @@ func resolve(ctx context.Context, work string, v version, roots []string) (downl
 	main.WriteString(")\n\nfunc main() {}\n")
 
 	if err = os.WriteFile(filepath.Join(work, "main.go"), []byte(main.String()), 0o600); err != nil {
-		return downloadedModule{}, "", fmt.Errorf("write work main.go: %w", err)
+		return nil, "", fmt.Errorf("write work main.go: %w", err)
 	}
 
 	if _, err = goCmd(ctx, work, []string{modModEnv}, "mod", "tidy"); err != nil {
-		return downloadedModule{}, "", err
+		return nil, "", err
 	}
 
-	return upstream, upstreamGo, nil
+	return map[string]downloadedModule{kubeSource.module: kubeMod, kineSource.module: kineMod}, kubeGo, nil
 }
 
-// writeTree writes the mirrored packages, the upstream LICENSE and MIRROR.json
-// into dst, replacing anything already there.
-func writeTree(dst, upstreamDir string, pkgs map[string]*pkgFiles, m manifest) error {
+func download(ctx context.Context, work, module string, v version) (downloadedModule, error) {
+	out, err := goCmd(ctx, work, nil, "mod", "download", "-json", module+"@"+v.String())
+	if err != nil {
+		return downloadedModule{}, err
+	}
+
+	var mod downloadedModule
+	if err = json.Unmarshal(out, &mod); err != nil {
+		return downloadedModule{}, fmt.Errorf("decode go mod download output: %w", err)
+	}
+
+	return mod, nil
+}
+
+// writeTree writes src's mirrored packages, the upstream LICENSE and
+// MIRROR.json into dst, replacing anything already there. Imports of every
+// mirrored upstream are rewritten, so mirrors may import each other.
+func writeTree(dst string, src source, upstream downloadedModule, pkgs map[string]*pkgFiles, m manifest) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("clear %s: %w", dst, err)
 	}
 
 	for _, p := range pkgs {
-		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, upstreamModule), "/")
+		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, src.module), "/")
 
 		for f := range p.Files {
-			data, err := os.ReadFile(filepath.Join(p.Dir, filepath.FromSlash(f)))
-			if err != nil {
-				return fmt.Errorf("read %s/%s: %w", p.ImportPath, f, err)
-			}
-
-			if strings.HasSuffix(f, ".go") {
-				data, err = rewriteImports(f, data, upstreamModule, mirrorModule)
-				if err != nil {
-					return err
-				}
-			}
-
-			if err = writeFile(filepath.Join(dst, filepath.FromSlash(rel), filepath.FromSlash(f)), data); err != nil {
+			if err := mirrorFile(p, f, filepath.Join(dst, filepath.FromSlash(rel), filepath.FromSlash(f))); err != nil {
 				return err
 			}
 		}
 	}
 
-	license, err := os.ReadFile(filepath.Join(upstreamDir, "LICENSE"))
+	license, err := os.ReadFile(filepath.Join(upstream.Dir, "LICENSE"))
 	if err != nil {
 		return fmt.Errorf("read upstream LICENSE: %w", err)
 	}
@@ -186,6 +270,26 @@ func writeTree(dst, upstreamDir string, pkgs map[string]*pkgFiles, m manifest) e
 	}
 
 	return m.write(filepath.Join(dst, manifestName))
+}
+
+// mirrorFile copies file f of package p to path, rewriting the imports of every
+// mirrored upstream in Go files.
+func mirrorFile(p *pkgFiles, f, path string) error {
+	data, err := os.ReadFile(filepath.Join(p.Dir, filepath.FromSlash(f)))
+	if err != nil {
+		return fmt.Errorf("read %s/%s: %w", p.ImportPath, f, err)
+	}
+
+	if strings.HasSuffix(f, ".go") {
+		for _, s := range sources {
+			data, err = rewriteImports(f, data, s.module, s.mirrorModule())
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return writeFile(path, data)
 }
 
 func writeFile(path string, data []byte) error {
@@ -204,14 +308,13 @@ func writeFile(path string, data []byte) error {
 	return nil
 }
 
-// swapAndPin moves the staged tree into place and pins go.mod. On failure the
-// previous tree, go.mod and go.sum are restored.
+// swapAndPin moves every staged tree into place and pins go.mod. On failure the
+// previous trees, go.mod and go.sum are restored.
 func swapAndPin(ctx context.Context, repo, work, upstreamGo string) error {
-	live := filepath.Join(repo, mirrorDir)
-	retired := filepath.Join(repo, retiredDir)
-
-	if err := os.RemoveAll(retired); err != nil {
-		return fmt.Errorf("clear %s: %w", retired, err)
+	for _, src := range sources {
+		if err := os.RemoveAll(src.retiredDir(repo)); err != nil {
+			return fmt.Errorf("clear %s: %w", src.retiredDir(repo), err)
+		}
 	}
 
 	backup, err := backupFiles(repo, "go.mod", "go.sum")
@@ -219,33 +322,65 @@ func swapAndPin(ctx context.Context, repo, work, upstreamGo string) error {
 		return err
 	}
 
-	if err = os.Rename(live, retired); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("retire old mirror: %w", err)
+	var installed []source
+
+	// rollback puts back the previous tree of every source swapped so far.
+	rollback := func() error {
+		var errs []error
+
+		for _, src := range installed {
+			live := filepath.Join(repo, filepath.FromSlash(src.dir))
+			errs = append(errs, os.RemoveAll(live), restoreRetired(src.retiredDir(repo), live))
+		}
+
+		return errors.Join(errs...)
 	}
 
-	if err = os.Rename(filepath.Join(repo, stagedDir), live); err != nil {
-		return errors.Join(fmt.Errorf("install new mirror: %w", err), os.Rename(retired, live))
+	for _, src := range sources {
+		live := filepath.Join(repo, filepath.FromSlash(src.dir))
+
+		if err = os.Rename(live, src.retiredDir(repo)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return errors.Join(fmt.Errorf("retire old %s mirror: %w", src.name, err), rollback())
+		}
+
+		if err = os.Rename(src.stagedDir(repo), live); err != nil {
+			return errors.Join(
+				fmt.Errorf("install new %s mirror: %w", src.name, err),
+				restoreRetired(src.retiredDir(repo), live),
+				rollback(),
+			)
+		}
+
+		installed = append(installed, src)
 	}
 
 	if err = pinGoMod(ctx, repo, work, upstreamGo); err != nil {
-		return errors.Join(
-			fmt.Errorf("pin go.mod: %w", err),
-			os.RemoveAll(live),
-			os.Rename(retired, live),
-			restoreFiles(repo, backup),
-		)
+		return errors.Join(fmt.Errorf("pin go.mod: %w", err), rollback(), restoreFiles(repo, backup))
 	}
 
-	if err = os.RemoveAll(retired); err != nil {
-		return fmt.Errorf("remove old mirror: %w", err)
+	for _, src := range sources {
+		if err = os.RemoveAll(src.retiredDir(repo)); err != nil {
+			return fmt.Errorf("remove old %s mirror: %w", src.name, err)
+		}
+	}
+
+	return nil
+}
+
+// restoreRetired moves a retired tree back to live, if there was one.
+func restoreRetired(retired, live string) error {
+	if err := os.Rename(retired, live); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("restore %s: %w", live, err)
 	}
 
 	return nil
 }
 
 // pinGoMod requires, in the repository, every module version the scratch
-// module selected, raises the go directive to upstream's if it is newer, and
-// tidies. MVS keeps any higher version petri's own dependencies need.
+// module selected, raises the go directive to Kubernetes's if it is newer, and
+// tidies. MVS keeps any higher version petri's own dependencies need. kine's
+// go directive is deliberately not carried over: petri should demand no newer
+// Go than Kubernetes does.
 func pinGoMod(ctx context.Context, repo, work, upstreamGo string) error {
 	out, err := goCmd(ctx, work, []string{modModEnv}, "list", "-m", "-json", "all")
 	if err != nil {
@@ -277,7 +412,7 @@ func pinGoMod(ctx context.Context, repo, work, upstreamGo string) error {
 			return fmt.Errorf("decode go list -m output: %w", decErr)
 		}
 
-		if mod.Main || mod.Path == upstreamModule {
+		if mod.Main || mirrored(mod.Path) {
 			continue
 		}
 

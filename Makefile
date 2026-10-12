@@ -20,5 +20,5 @@ fmt: ## Format code with the golangci-lint formatters (both modules)
 tidy: ## Tidy go.mod (both modules)
 	@for m in $(MODULES); do (cd $$m && go mod tidy) || exit 1; done
 
-mirror: ## Regenerate internal/kubernetes (K8S_VERSION=v1.N.P switches version)
-	go run ./hack/mirror sync $(if $(K8S_VERSION),-version $(K8S_VERSION))
+mirror: ## Regenerate internal/kubernetes and internal/kine (K8S_VERSION=v1.N.P, KINE_VERSION=v0.N.P switch versions)
+	go run ./hack/mirror sync $(if $(K8S_VERSION),-version $(K8S_VERSION)) $(if $(KINE_VERSION),-kine-version $(KINE_VERSION))

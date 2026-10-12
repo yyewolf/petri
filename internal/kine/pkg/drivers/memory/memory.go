@@ -1,0 +1,601 @@
+package memory
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"sync"
+	"sync/atomic"
+
+	"github.com/yyewolf/petri/internal/kine/pkg/broadcaster"
+	"github.com/yyewolf/petri/internal/kine/pkg/drivers"
+	"github.com/yyewolf/petri/internal/kine/pkg/server"
+	"github.com/yyewolf/petri/internal/kine/pkg/ttl"
+	"github.com/sirupsen/logrus"
+	"github.com/tidwall/btree"
+)
+
+func init() {
+	drivers.Register("memory", New)
+}
+
+func New(ctx context.Context, wg *sync.WaitGroup, cfg *drivers.Config) (bool, server.Backend, error) {
+	logrus.Info("using in-memory backend")
+	return false, &Memory{
+		keys:     btree.NewMap[string, []*entry](0),
+		notifyCh: make(chan struct{}),
+	}, nil
+}
+
+type entry struct {
+	revision       int64
+	key            string
+	value          []byte
+	createRevision int64
+	version        int64
+	prevRevision   int64
+	lease          int64
+	created        bool
+	deleted        bool
+	prev           *entry
+}
+
+func (e *entry) toKeyValue() *server.KeyValue {
+	return &server.KeyValue{
+		Key:            e.key,
+		Value:          e.value,
+		CreateRevision: e.createRevision,
+		ModRevision:    e.revision,
+		Version:        e.version,
+		Lease:          e.lease,
+	}
+}
+
+type keyString string
+
+func (k keyString) InRange(key, end string) bool {
+	return key == "" || (end != "" && string(k) >= key && string(k) < end) || string(k) == key
+}
+
+type Memory struct {
+	mu              sync.RWMutex
+	currentRevision atomic.Int64
+	compactRevision int64
+	broadcaster     broadcaster.Broadcaster
+	ctx             context.Context
+
+	log  []*entry
+	keys *btree.Map[string, []*entry]
+
+	notifyMu sync.Mutex
+	notifyCh chan struct{}
+}
+
+// explicit interface check
+var _ server.Backend = &Memory{}
+
+func (m *Memory) Start(ctx context.Context) error {
+	// See https://github.com/kubernetes/kubernetes/blob/442a69c3bdf6fe8e525b05887e57d89db1e2f3a5/staging/src/k8s.io/apiserver/pkg/storage/storagebackend/factory/etcd3.go#L970
+	if _, err := m.Create(ctx, server.HealthKey, []byte(server.HealthVal), 0); err != nil {
+		logrus.Errorf("Failed to create health check key: %v", err)
+	}
+	// update health to create rev=2 for consistency with other backends
+	if _, _, _, err := m.Update(ctx, server.HealthKey, []byte(server.HealthVal), 1, 0); err != nil {
+		logrus.Errorf("Failed to update health check key: %v", err)
+	}
+	m.ctx = ctx
+	go ttl.Run(ctx, m)
+	return nil
+}
+
+func (m *Memory) CurrentRevision(ctx context.Context) (int64, error) {
+	return m.currentRevision.Load(), nil
+}
+
+func (m *Memory) DbSize(ctx context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var size int64
+	for _, e := range m.log {
+		size += int64(len(e.key) + len(e.value) + 64)
+	}
+	return size, nil
+}
+
+// nextRevision allocates and returns the next revision. Increment is
+// atomic; callers still need m.mu (write) when pairing the new revision
+// with an appendEntry, so the log stays in revision order.
+func (m *Memory) nextRevision() int64 {
+	return m.currentRevision.Add(1)
+}
+
+// appendEntry adds e to the log and to its key's history, wiring up
+// e.prev to point at the previous entry for the same key (if any).
+// Caller must hold m.mu (write).
+func (m *Memory) appendEntry(e *entry) {
+	m.log = append(m.log, e)
+	hist, _ := m.keys.Get(e.key)
+	if len(hist) > 0 {
+		e.prev = hist[len(hist)-1]
+	}
+	m.keys.Set(e.key, append(hist, e))
+	m.broadcast()
+}
+
+// broadcast wakes every goroutine currently blocked on getNotifyCh.
+// Implemented as close-and-replace rather than sync.Cond.Broadcast so that
+// waiters can select on ctx.Done() alongside the wake — sync.Cond.Wait()
+// can't be combined with context cancellation without a helper goroutine.
+func (m *Memory) broadcast() {
+	m.notifyMu.Lock()
+	close(m.notifyCh)
+	m.notifyCh = make(chan struct{})
+	m.notifyMu.Unlock()
+}
+
+// getNotifyCh returns a channel that will be closed on the next broadcast.
+// Watchers should grab it BEFORE scanning the log so they don't miss a
+// broadcast that fires while they're iterating.
+func (m *Memory) getNotifyCh() <-chan struct{} {
+	m.notifyMu.Lock()
+	ch := m.notifyCh
+	m.notifyMu.Unlock()
+	return ch
+}
+
+// latest returns the most recent entry for key, or nil if none exists.
+// The returned entry may be a tombstone (deleted == true).
+// Caller must hold m.mu (read or write).
+func (m *Memory) latest(key string) *entry {
+	hist, ok := m.keys.Get(key)
+	if !ok || len(hist) == 0 {
+		return nil
+	}
+	return hist[len(hist)-1]
+}
+
+// atRevision returns the entry for key with the highest revision <= revision,
+// or nil if no such entry exists.
+// Caller must hold m.mu (read or write).
+func (m *Memory) atRevision(key string, revision int64) *entry {
+	hist, ok := m.keys.Get(key)
+	if !ok {
+		return nil
+	}
+	var result *entry
+	for _, e := range hist {
+		if e.revision <= revision {
+			result = e
+		} else {
+			break
+		}
+	}
+	return result
+}
+
+// logIndexAfter returns the index of the first log entry with revision > rev.
+// The log is dense and ordered, with m.log[0].revision == m.compactRevision+1,
+// so the index is just rev - m.compactRevision (clamped). For rev values at or
+// below m.compactRevision the result is 0; for rev at or above the highest
+// stored revision the result is len(m.log).
+// Caller must hold m.mu (read or write).
+func (m *Memory) logIndexAfter(rev int64) int {
+	i := rev - m.compactRevision
+	if i < 0 {
+		i = 0
+	}
+	if i > int64(len(m.log)) {
+		i = int64(len(m.log))
+	}
+	return int(i)
+}
+
+// Get returns the current revision and the KeyValue for the given key.
+func (m *Memory) Get(ctx context.Context, key string, revision int64, keysOnly bool) (int64, *server.KeyValue, error) {
+	rev, kvs, err := m.List(ctx, key, "", 1, revision, keysOnly)
+	if err != nil {
+		return rev, nil, err
+	}
+	if len(kvs) == 0 {
+		return rev, nil, nil
+	}
+	return rev, kvs[0], nil
+}
+
+func (m *Memory) Create(ctx context.Context, key string, value []byte, lease int64) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	latest := m.latest(key)
+	if latest != nil && !latest.deleted {
+		return m.currentRevision.Load(), server.ErrKeyExists
+	}
+
+	rev := m.nextRevision()
+	var prevRev int64
+	if latest != nil {
+		prevRev = latest.revision
+	}
+
+	m.appendEntry(&entry{
+		revision:       rev,
+		key:            key,
+		value:          value,
+		createRevision: rev,
+		version:        1,
+		prevRevision:   prevRev,
+		lease:          lease,
+		created:        true,
+	})
+	return rev, nil
+}
+
+func (m *Memory) Update(ctx context.Context, key string, value []byte, revision, lease int64) (int64, *server.KeyValue, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	latest := m.latest(key)
+	if latest == nil || latest.deleted {
+		return m.currentRevision.Load(), nil, false, nil
+	}
+	if latest.revision != revision {
+		return m.currentRevision.Load(), latest.toKeyValue(), false, nil
+	}
+
+	rev := m.nextRevision()
+	e := &entry{
+		revision:       rev,
+		key:            key,
+		value:          value,
+		createRevision: latest.createRevision,
+		version:        latest.version + 1,
+		prevRevision:   latest.revision,
+		lease:          lease,
+	}
+	m.appendEntry(e)
+	return rev, e.toKeyValue(), true, nil
+}
+
+func (m *Memory) Delete(ctx context.Context, key string, revision int64) (int64, *server.KeyValue, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	latest := m.latest(key)
+	if latest == nil || latest.deleted {
+		return m.currentRevision.Load(), nil, false, nil
+	}
+	if revision != 0 && latest.revision != revision {
+		return m.currentRevision.Load(), latest.toKeyValue(), false, nil
+	}
+
+	rev := m.nextRevision()
+	m.appendEntry(&entry{
+		revision:       rev,
+		key:            key,
+		value:          latest.value,
+		createRevision: latest.createRevision,
+		version:        latest.version,
+		prevRevision:   latest.revision,
+		lease:          latest.lease,
+		deleted:        true,
+	})
+	return rev, latest.toKeyValue(), true, nil
+}
+
+func (m *Memory) List(ctx context.Context, key, end string, limit, revision int64, keysOnly bool) (int64, []*server.KeyValue, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rev := m.currentRevision.Load()
+	if revision > 0 {
+		if revision > rev {
+			return rev, nil, server.ErrFutureRev
+		}
+		if revision < m.compactRevision {
+			return rev, nil, server.ErrCompacted
+		}
+	}
+
+	iter := m.keys.Iter()
+	if !iter.Seek(key) {
+		return rev, nil, nil
+	}
+
+	var kvs []*server.KeyValue
+	for {
+		k := iter.Key()
+		if k == "" {
+			iter.Next()
+			continue
+		}
+		if !keyString(k).InRange(key, end) {
+			break
+		}
+
+		var e *entry
+		if revision > 0 {
+			e = m.atRevision(k, revision)
+		} else {
+			e = m.latest(k)
+		}
+
+		if e != nil && !e.deleted {
+			kv := e.toKeyValue()
+			if keysOnly {
+				kv.Value = nil
+			}
+			kvs = append(kvs, kv)
+		}
+
+		if limit > 0 && int64(len(kvs)) >= limit {
+			break
+		}
+
+		if !iter.Next() {
+			break
+		}
+	}
+	return rev, kvs, nil
+}
+
+func (m *Memory) ListStream(ctx context.Context, key, end string, limit, revision int64, keysOnly bool) server.ListResult {
+	var (
+		kvc  = make(chan *server.KeyValue, 1)
+		errc = make(chan error, 1)
+	)
+	errorResult := func(err error) server.ListResult {
+		if err != nil {
+			errc <- err
+		}
+		close(kvc)
+		close(errc)
+		return server.ListResult{KVc: kvc, Errorc: errc}
+	}
+
+	rev := m.currentRevision.Load()
+	if revision > 0 {
+		if revision > rev {
+			return errorResult(server.ErrFutureRev)
+		}
+		if revision < m.compactRevision {
+			return errorResult(server.ErrCompacted)
+		}
+	}
+
+	// stream rows into kv channel
+	go func() {
+		defer close(kvc)
+		defer close(errc)
+		iter := m.keys.Iter()
+		if !iter.Seek(key) {
+			return
+		}
+		var count int64
+		for {
+			k := iter.Key()
+			if k == "" {
+				iter.Next()
+				continue
+			}
+			if !keyString(k).InRange(key, end) {
+				return
+			}
+
+			var e *entry
+			if revision > 0 {
+				e = m.atRevision(k, revision)
+			} else {
+				e = m.latest(k)
+			}
+
+			if e != nil && !e.deleted {
+				kv := e.toKeyValue()
+				if keysOnly {
+					kv.Value = nil
+				}
+				count++
+				kvc <- kv
+			}
+
+			if limit > 0 && count >= limit {
+				return
+			}
+
+			if !iter.Next() {
+				return
+			}
+		}
+	}()
+
+	return server.ListResult{KVc: kvc, Errorc: errc, CurrentRevision: rev}
+}
+
+func (m *Memory) Count(ctx context.Context, key, end string, revision int64) (int64, int64, error) {
+	rev, kvs, err := m.List(ctx, key, end, 0, revision, true)
+	if err != nil {
+		return rev, 0, err
+	}
+	return rev, int64(len(kvs)), nil
+}
+
+func (m *Memory) Watch(ctx context.Context, revision int64) server.WatchResult {
+	// starting watching right away so we don't miss anything
+	ctx, cancel := context.WithCancel(ctx)
+	readChan := m.broadcaster.Watch(ctx, m.startWatch)
+
+	result := make(chan server.EventBatch, 100)
+	errc := make(chan error, 1)
+	wr := server.WatchResult{Eventc: result, Errorc: errc}
+
+	// include the current revision in list
+	if revision > 1 {
+		revision--
+	}
+
+	var batch server.EventBatch
+	var err error
+
+	if revision == 0 {
+		wr.CurrentRevision, err = m.CurrentRevision(ctx)
+		batch.CurrentRev = wr.CurrentRevision
+	} else {
+		batch, err = m.after(ctx, revision)
+		wr.CurrentRevision = batch.CurrentRev
+	}
+
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			if err == server.ErrCompacted {
+				m.mu.RLock()
+				wr.CompactRevision = m.compactRevision
+				m.mu.RUnlock()
+			} else {
+				errc <- server.ErrGRPCUnhealthy
+			}
+		}
+		cancel()
+	}
+
+	result <- batch
+
+	rev := wr.CurrentRevision
+	go func() {
+		// always ensure we fully read the channel
+		for i := range readChan {
+			result <- i.After(rev)
+		}
+		close(result)
+		cancel()
+	}()
+
+	return wr
+}
+
+func (m *Memory) startWatch() (chan server.EventBatch, error) {
+	events := make(chan server.EventBatch)
+	go func() {
+		defer close(events)
+		var batch server.EventBatch
+		for {
+			notifyCh := m.getNotifyCh()
+			batch, _ = m.after(m.ctx, batch.CurrentRev)
+
+			if batch.CurrentRev != 0 {
+				select {
+				case events <- batch:
+				case <-m.ctx.Done():
+					return
+				}
+			}
+
+			select {
+			case <-notifyCh:
+			case <-m.ctx.Done():
+				return
+			}
+		}
+	}()
+	return events, nil
+}
+
+func (m *Memory) after(ctx context.Context, revision int64) (server.EventBatch, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	batch := server.EventBatch{CurrentRev: m.currentRevision.Load()}
+	// The compact revision itself can still be queried, so it is only an error to watch anything before compactRev - 1
+	if revision > batch.CurrentRev {
+		return batch, nil
+	} else if revision < m.compactRevision-1 {
+		return batch, server.ErrCompacted
+	}
+
+	for i := m.logIndexAfter(revision); i < len(m.log); i++ {
+		e := m.log[i]
+		event := &server.Event{
+			Create: e.created,
+			Delete: e.deleted,
+			KV:     e.toKeyValue(),
+		}
+		// PrevKV should be nil if revision has been compacted; ref:
+		// https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/storage/etcd3/event.go#L66-L67
+		if e.prev != nil && e.prev.revision >= m.compactRevision {
+			event.PrevKV = e.prev.toKeyValue()
+		}
+		batch.Events = append(batch.Events, event)
+		batch.CurrentRev = e.revision
+	}
+	return batch, nil
+}
+
+// Compact discards events below the given revision. The log slice is trimmed
+// to entries with revision > the compact target — events at or below the
+// boundary are no longer accessible to watchers. Per-key history in m.keys is
+// trimmed to its floor (the latest entry with revision <= the target) so that
+// reads at the compact boundary still resolve to the correct value; if that
+// floor is a tombstone the entire key history is removed. Entries with
+// revision > the compact target are always retained.
+func (m *Memory) Compact(ctx context.Context, revision int64) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rev := m.currentRevision.Load()
+	if revision > rev {
+		return 0, server.ErrFutureRev
+	}
+	if revision <= m.compactRevision {
+		return 0, server.ErrCompacted
+	}
+
+	var toRemove []string
+
+	m.keys.Scan(func(key string, hist []*entry) bool {
+		floorIdx := -1
+		for i, e := range hist {
+			if e.revision <= revision {
+				floorIdx = i
+			} else {
+				break
+			}
+		}
+
+		var newHist []*entry
+		switch {
+		case floorIdx < 0:
+			// No entry at or below the compact boundary; keep everything.
+			newHist = hist
+		case hist[floorIdx].deleted:
+			// Floor is a tombstone — drop it and everything before; readers
+			// at the compact boundary correctly see the key as absent.
+			newHist = hist[floorIdx+1:]
+		default:
+			newHist = hist[floorIdx:]
+		}
+
+		if len(newHist) == 0 {
+			toRemove = append(toRemove, key)
+		} else if len(newHist) != len(hist) {
+			// The new first entry's predecessor is being dropped; clear the
+			// pointer so the dropped entry can be garbage collected.
+			newHist[0].prev = nil
+			m.keys.Set(key, newHist)
+		}
+		return true
+	})
+
+	for _, k := range toRemove {
+		m.keys.Delete(k)
+	}
+
+	// Trim the log. Because the log is dense and ordered by revision, the cut
+	// point is just before (revision - oldCompactRevision); everything before that has
+	// revision < the target and is no longer reachable via Watch.
+	// We know that revision must be > currentRevision and <= compactRevision,
+	// but guard against cutting out of bounds or removing all entries.
+	if cut := int(revision-m.compactRevision) - 1; cut > 0 {
+		// use slices.Delete to bulk-zero deleted elements from the backing array for GC
+		m.log = slices.Delete(m.log, 0, cut)
+	}
+
+	m.compactRevision = revision
+	return rev, nil
+}

@@ -37,6 +37,28 @@ func TestManifestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestManifestOmitsTheOtherSourcesVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "MIRROR.json")
+	if err := (manifest{Kine: "v0.17.2", Roots: []string{"github.com/k3s-io/kine/pkg/server"}}).write(
+		path,
+	); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const wantRaw = "{\n  \"kine\": \"v0.17.2\",\n  \"roots\": [\n" +
+		"    \"github.com/k3s-io/kine/pkg/server\"\n  ]\n}\n"
+	if string(raw) != wantRaw {
+		t.Errorf("file contents = %q, want %q", raw, wantRaw)
+	}
+}
+
 func TestReadManifestRequiresRoots(t *testing.T) {
 	t.Parallel()
 

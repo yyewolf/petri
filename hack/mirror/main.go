@@ -9,7 +9,8 @@ import (
 	"os"
 )
 
-const usage = "usage: mirror sync [-repo DIR] [-version v1.N.P] | mirror plan [-repo DIR] [-remote NAME]"
+const usage = "usage: mirror sync [-repo DIR] [-version v1.N.P] [-kine-version v0.N.P] | " +
+	"mirror plan [-repo DIR] [-remote NAME]"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
@@ -28,12 +29,13 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 
 	switch args[0] {
 	case "sync":
-		ver := flags.String("version", "", "Kubernetes version to mirror (default: the one in MIRROR.json)")
+		ver := flags.String("version", "", "Kubernetes version to mirror (default: internal/kubernetes/MIRROR.json's)")
+		kineVer := flags.String("kine-version", "", "kine version to mirror (default: internal/kine/MIRROR.json's)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return fmt.Errorf("parse flags: %w", err)
 		}
 
-		return runSync(ctx, *repo, *ver)
+		return runSync(ctx, *repo, *ver, *kineVer)
 	case "plan":
 		remote := flags.String("remote", "origin", "git remote that holds the release branches")
 		if err := flags.Parse(args[1:]); err != nil {

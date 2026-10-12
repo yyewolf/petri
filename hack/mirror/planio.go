@@ -43,7 +43,14 @@ func releaseBranch(ref, remote string) (string, bool) {
 }
 
 func runPlan(ctx context.Context, repo, remote string, w io.Writer) error {
-	versions, err := fetchVersions(ctx, proxyURL(os.Getenv("GOPROXY")))
+	proxy := proxyURL(os.Getenv("GOPROXY"))
+
+	versions, err := fetchVersions(ctx, proxy, kubeSource.module)
+	if err != nil {
+		return err
+	}
+
+	kineVersions, err := fetchVersions(ctx, proxy, kineSource.module)
 	if err != nil {
 		return err
 	}
@@ -53,7 +60,7 @@ func runPlan(ctx context.Context, repo, remote string, w io.Writer) error {
 		return err
 	}
 
-	updates, err := Plan(versions, branches)
+	updates, err := Plan(versions, kineVersions, branches)
 	if err != nil {
 		return err
 	}
@@ -67,15 +74,15 @@ func runPlan(ctx context.Context, repo, remote string, w io.Writer) error {
 	return nil
 }
 
-func fetchVersions(ctx context.Context, proxy string) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy+"/"+upstreamModule+"/@v/list", nil)
+func fetchVersions(ctx context.Context, proxy, module string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy+"/"+module+"/@v/list", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build proxy request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("list %s versions: %w", upstreamModule, err)
+		return nil, fmt.Errorf("list %s versions: %w", module, err)
 	}
 	defer resp.Body.Close()
 
@@ -85,7 +92,7 @@ func fetchVersions(ctx context.Context, proxy string) ([]string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list %s versions: %s: %s", upstreamModule, resp.Status, body)
+		return nil, fmt.Errorf("list %s versions: %s: %s", module, resp.Status, body)
 	}
 
 	return strings.Fields(string(body)), nil
@@ -105,20 +112,40 @@ func listBranches(ctx context.Context, repo, remote string) ([]Branch, error) {
 			continue
 		}
 
-		raw, showErr := gitCmd(ctx, repo, "show", remote+"/"+name+":"+mirrorDir+"/"+manifestName)
+		kube, found, showErr := branchManifest(ctx, repo, remote, name, kubeSource)
 		if showErr != nil {
+			return nil, showErr
+		}
+
+		if !found {
 			continue // the branch predates the mirror
 		}
 
-		var m manifest
-		if err = json.Unmarshal(raw, &m); err != nil {
-			return nil, fmt.Errorf("branch %s: parse %s: %w", name, manifestName, err)
+		kine, _, showErr := branchManifest(ctx, repo, remote, name, kineSource)
+		if showErr != nil {
+			return nil, showErr
 		}
 
-		branches = append(branches, Branch{Name: name, Version: m.Kubernetes})
+		branches = append(branches, Branch{Name: name, Version: kube.Kubernetes, Kine: kine.Kine})
 	}
 
 	return branches, nil
+}
+
+// branchManifest reads src's MIRROR.json on a remote branch, reporting whether
+// the branch has one.
+func branchManifest(ctx context.Context, repo, remote, branch string, src source) (manifest, bool, error) {
+	raw, err := gitCmd(ctx, repo, "show", remote+"/"+branch+":"+src.dir+"/"+manifestName)
+	if err != nil {
+		return manifest{}, false, nil //nolint:nilerr // a missing file means the branch has no such mirror.
+	}
+
+	var m manifest
+	if err = json.Unmarshal(raw, &m); err != nil {
+		return manifest{}, false, fmt.Errorf("branch %s: parse %s/%s: %w", branch, src.dir, manifestName, err)
+	}
+
+	return m, true, nil
 }
 
 func gitCmd(ctx context.Context, dir string, args ...string) ([]byte, error) {

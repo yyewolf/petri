@@ -82,10 +82,13 @@ func collect(r io.Reader, module string, into map[string]*pkgFiles) error {
 	}
 }
 
-// closure lists the upstream packages the roots need on every supported
-// platform, with and without cgo.
-func closure(ctx context.Context, work string, roots []string) (map[string]*pkgFiles, error) {
-	pkgs := map[string]*pkgFiles{}
+// closure lists the packages of each mirrored upstream that the roots need on
+// every supported platform, with and without cgo, keyed by upstream module.
+func closure(ctx context.Context, work string, roots []string) (map[string]map[string]*pkgFiles, error) {
+	pkgs := map[string]map[string]*pkgFiles{}
+	for _, src := range sources {
+		pkgs[src.module] = map[string]*pkgFiles{}
+	}
 
 	for _, p := range platforms() {
 		for _, cgo := range []string{"0", "1"} {
@@ -96,8 +99,10 @@ func closure(ctx context.Context, work string, roots []string) (map[string]*pkgF
 				return nil, err
 			}
 
-			if err = collect(bytes.NewReader(out), upstreamModule, pkgs); err != nil {
-				return nil, err
+			for _, src := range sources {
+				if err = collect(bytes.NewReader(out), src.module, pkgs[src.module]); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

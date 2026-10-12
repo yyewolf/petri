@@ -2,43 +2,42 @@ package petri
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
+	"net"
 	"slices"
 	"sync"
 	"time"
 
-	"github.com/k3s-io/kine/pkg/drivers"
-	"github.com/k3s-io/kine/pkg/drivers/memory"
-	"github.com/k3s-io/kine/pkg/endpoint"
-	"github.com/k3s-io/kine/pkg/server"
+	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
+	"github.com/yyewolf/petri/internal/kine/pkg/drivers"
+	"github.com/yyewolf/petri/internal/kine/pkg/drivers/memory"
+	"github.com/yyewolf/petri/internal/kine/pkg/server"
 )
 
 const (
-	// kineScheme names petri's wrapper around kine's memory driver.
-	kineScheme   = "petri-memory"
-	kineEndpoint = kineScheme + "://"
-	kineListener = "tcp://127.0.0.1:0"
 	// kine's CLI defaults. The library leaves them zero, which would disable
 	// the watch progress notifications kube-apiserver relies on.
 	kineEmulatedETCDVersion = "3.6.11"
 	kineNotifyInterval      = 5 * time.Second
-	watchBuffer             = 100
+	// kine's own grace period for its gRPC server before a hard stop.
+	kineStopTimeout = 2 * time.Second
+	watchBuffer     = 100
+
+	// etcd's embed defaults, which kine's gRPC server copies. The keepalive
+	// minimum matters: kube-apiserver's etcd client pings every 30s, and gRPC's
+	// default 5m minimum would close its connections with too_many_pings.
+	grpcKeepAliveMinTime     = 5 * time.Second
+	grpcKeepAliveInterval    = 2 * time.Hour
+	grpcKeepAliveTimeout     = 20 * time.Second
+	grpcMaxRequestBytes      = 1.5 * 1024 * 1024
+	grpcOverheadBytes        = 512 * 1024
+	grpcMaxConcurrentStreams = math.MaxUint32
 )
-
-// registerKineDriver registers kineScheme once. kine's registry is a plain map,
-// so it must not be written while another control plane is starting.
-var registerKineDriver = sync.OnceFunc(func() { //nolint:gochecknoglobals // kine's driver registry is process-wide.
-	drivers.Register(kineScheme, func(
-		ctx context.Context, wg *sync.WaitGroup, cfg *drivers.Config,
-	) (bool, server.Backend, error) {
-		leaderElect, backend, err := memory.New(ctx, wg, cfg)
-		if err != nil {
-			return false, nil, fmt.Errorf("kine memory driver: %w", err)
-		}
-
-		return leaderElect, clippedBackend{&lockedBackend{Backend: backend}}, nil
-	})
-})
 
 // lockedBackend serializes the memory driver's reads against its writes.
 // kine's memory driver keeps every read but ListStream under its own lock;
@@ -202,21 +201,75 @@ func (b clippedBackend) Watch(ctx context.Context, revision int64) server.WatchR
 	return res
 }
 
-// startKine serves an in-memory etcd-compatible store until ctx is cancelled
-// and returns its client endpoints. wg tracks kine's goroutines.
+// startKine serves kine's in-memory store over etcd's gRPC API until ctx is
+// cancelled and returns its client endpoints. wg tracks the server goroutines.
+//
+// It does what kine's endpoint.Listen does for one driver. endpoint imports
+// every kine backend, which would link an embedded NATS server, SQL drivers
+// and an S3 client into every user's test binary.
 func startKine(ctx context.Context, wg *sync.WaitGroup) ([]string, error) {
-	registerKineDriver()
+	// The store outlives ctx until the gRPC server has drained, so in-flight
+	// requests from a stopping kube-apiserver still reach it.
+	storeCtx, stopStore := context.WithCancel(context.Background())
 
-	etcd, err := endpoint.Listen(ctx, endpoint.Config{
-		WaitGroup:           wg,
-		Endpoint:            kineEndpoint,
-		Listener:            kineListener,
-		EmulatedETCDVersion: kineEmulatedETCDVersion,
-		NotifyInterval:      kineNotifyInterval,
-	})
+	_, backend, err := memory.New(storeCtx, wg, &drivers.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("start kine: %w", err)
+		stopStore()
+
+		return nil, fmt.Errorf("kine memory driver: %w", err)
 	}
 
-	return etcd.Endpoints, nil
+	backend = clippedBackend{&lockedBackend{Backend: backend}}
+
+	err = backend.Start(storeCtx)
+	if err != nil {
+		stopStore()
+
+		return nil, fmt.Errorf("start kine backend: %w", err)
+	}
+
+	var lc net.ListenConfig
+
+	listener, err := lc.Listen(storeCtx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		stopStore()
+
+		return nil, fmt.Errorf("kine listener: %w", err)
+	}
+
+	srv := newKineGRPCServer()
+	server.New(backend, "http", kineNotifyInterval, kineEmulatedETCDVersion).Register(srv)
+
+	wg.Go(func() {
+		serveErr := srv.Serve(listener)
+		if serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped) {
+			logrus.Errorf("kine gRPC server exited: %v", serveErr)
+		}
+	})
+
+	wg.Go(func() {
+		defer stopStore()
+
+		<-ctx.Done()
+
+		timer := time.AfterFunc(kineStopTimeout, srv.Stop)
+		defer timer.Stop()
+
+		srv.GracefulStop()
+	})
+
+	return []string{"http://" + listener.Addr().String()}, nil
+}
+
+func newKineGRPCServer() *grpc.Server {
+	return grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: grpcKeepAliveMinTime}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    grpcKeepAliveInterval,
+			Timeout: grpcKeepAliveTimeout,
+		}),
+		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
+		grpc.MaxRecvMsgSize(grpcMaxRequestBytes+grpcOverheadBytes),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+	)
 }

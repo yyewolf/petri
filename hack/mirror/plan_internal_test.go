@@ -15,12 +15,14 @@ func TestPlan(t *testing.T) {
 		"garbage",
 	}
 	with := func(extra ...string) []string { return append(slices.Clone(base), extra...) }
+	kine := []string{"v0.16.4", "v0.16.5", "v0.17.1", "v0.17.2", "v0.18.0-rc1", "v1.14.2"}
 
 	cases := []struct {
-		name      string
-		available []string
-		branches  []Branch
-		want      []Update
+		name          string
+		available     []string
+		kineAvailable []string
+		branches      []Branch
+		want          []Update
 	}{
 		{
 			name:      "patch on main",
@@ -65,6 +67,34 @@ func TestPlan(t *testing.T) {
 			want:      []Update{{Branch: "main", Version: "v1.38.0", Kind: kindMinor}},
 		},
 		{
+			name:          "kine patch rides along with a Kubernetes patch",
+			available:     base,
+			kineAvailable: kine,
+			branches:      []Branch{{Name: "main", Version: "v1.37.1", Kine: "v0.17.1"}},
+			want:          []Update{{Branch: "main", Version: "v1.37.2", Kind: kindPatch, Kine: "v0.17.2"}},
+		},
+		{
+			name:          "kine patch alone keeps the Kubernetes version",
+			available:     base,
+			kineAvailable: kine,
+			branches:      []Branch{{Name: "release-1.36", Version: "v1.36.4", Kine: "v0.16.4"}},
+			want:          []Update{{Branch: "release-1.36", Version: "v1.36.4", Kind: kindKine, Kine: "v0.16.5"}},
+		},
+		{
+			name:          "kine never moves to a new minor or a stray major",
+			available:     base,
+			kineAvailable: kine,
+			branches:      []Branch{{Name: "main", Version: "v1.37.2", Kine: "v0.17.2"}},
+			want:          nil,
+		},
+		{
+			name:          "branches without a kine mirror get no kine update",
+			available:     base,
+			kineAvailable: kine,
+			branches:      []Branch{{Name: "release-1.36", Version: "v1.36.4"}},
+			want:          nil,
+		},
+		{
 			name:      "several branches come out sorted",
 			available: base,
 			branches: []Branch{
@@ -82,7 +112,7 @@ func TestPlan(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Plan(tc.available, tc.branches)
+			got, err := Plan(tc.available, tc.kineAvailable, tc.branches)
 			if err != nil {
 				t.Fatalf("Plan: %v", err)
 			}
@@ -99,7 +129,11 @@ func TestPlan(t *testing.T) {
 func TestPlanRejectsUnparseableBranchVersion(t *testing.T) {
 	t.Parallel()
 
-	if _, err := Plan([]string{"v1.37.1"}, []Branch{{Name: "main", Version: "garbage"}}); err == nil {
+	if _, err := Plan([]string{"v1.37.1"}, nil, []Branch{{Name: "main", Version: "garbage"}}); err == nil {
 		t.Fatal("Plan accepted a branch with an unparseable mirrored version")
+	}
+
+	if _, err := Plan(nil, nil, []Branch{{Name: "main", Version: "v1.37.1", Kine: "garbage"}}); err == nil {
+		t.Fatal("Plan accepted a branch with an unparseable mirrored kine version")
 	}
 }

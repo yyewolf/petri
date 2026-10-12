@@ -7,10 +7,12 @@ import (
 	"os"
 )
 
-// manifest is internal/kubernetes/MIRROR.json: the tool's input (roots) and its
-// record of what was mirrored (kubernetes).
+// manifest is a mirror's MIRROR.json: the tool's input (roots) and its record
+// of what was mirrored, kubernetes in internal/kubernetes and kine in
+// internal/kine.
 type manifest struct {
-	Kubernetes string   `json:"kubernetes"`
+	Kubernetes string   `json:"kubernetes,omitempty"`
+	Kine       string   `json:"kine,omitempty"`
 	Roots      []string `json:"roots"`
 }
 

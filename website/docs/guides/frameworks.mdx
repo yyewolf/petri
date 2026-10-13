@@ -1,5 +1,44 @@
 ---
 sidebar_position: 11
+description: Use petri from Ginkgo and other frameworks without a testing.T.
 ---
 
+import CodeBlock from '@theme/CodeBlock';
+import Suite from '!!raw-loader!@site/examples/ginkgo/suite_test.go';
+import Spec from '!!raw-loader!@site/examples/ginkgo/collection_test.go';
+
 # Ginkgo and other frameworks
+
+Most petri helpers take a `testing.TB` and fail the test themselves. Ginkgo
+specs, and other frameworks with their own runner, do not have one: Ginkgo's
+`GinkgoT()` is not a `testing.TB`. For them, every helper has a variant that
+takes a context and returns an error.
+
+<CodeBlock language="go" title="suite_test.go">{Suite}</CodeBlock>
+
+<CodeBlock language="go" title="collection_test.go">{Spec}</CodeBlock>
+
+| With a `testing.TB` | Context variant |
+|---|---|
+| `petri.Start(t)` | `petri.New(ctx)`, then `Stop` |
+| `cp.Namespace(t)` | `cp.NewNamespace(ctx)`; you delete it |
+| `cp.InstallCRDs(t, ...)` | `cp.InstallCRDsCtx(ctx, ...)` |
+| `cp.InstallAdmissionWebhooks(t, ...)` | `cp.InstallAdmissionWebhooksCtx(ctx, ...)`, which returns a cleanup |
+| `petri.WaitFor(t, ...)` | `petri.WaitUntil(ctx, ...)` |
+| `petri.Retry(t, ...)` | `petri.RetryUntil(ctx, ...)` |
+| `cp.AddNode(t, ...)` | `cp.AddNodeCtx(ctx, ...)`; you delete it |
+| `node.Drain(t)`, `node.Cordon(t)`, … | `node.DrainCtx(ctx)`, `node.CordonCtx(ctx)`, … |
+| `cp.Bind(t, ...)`, `cp.Evict(t, ...)`, … | `cp.BindCtx(ctx, ...)`, `cp.EvictCtx(ctx, ...)`, … |
+| `cp.ExpectPod(t, ...)` | `cp.ExpectPodCtx(ctx, ...)` |
+| `cp.ExpectPods(t, ...)` | `cp.ExpectPodsCtx(ctx, ...)`, then `Verify(ctx)` |
+| `cp.StrictPods(t)` | `cp.StrictPodsCtx(ctx)`, then `cp.UnexpectedPods()` |
+
+The `t` variants register cleanups with the test; the context variants leave
+cleanup to you, for example with Ginkgo's `DeferCleanup`.
+
+The shared plane is only available through `petri.Start(t)`. A Ginkgo suite
+starts a dedicated plane in `BeforeSuite`, which costs about two seconds once
+per suite.
+
+With the [envtest drop-in](migrating-from-envtest.mdx), a kubebuilder Ginkgo
+suite needs none of this: change the import and keep the suite as it is.

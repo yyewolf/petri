@@ -475,6 +475,13 @@ linters:
     - text: 'comment on exported \S+ \S+ should be of the form ".+"'
       source: '// ?(nolint|TODO)'
       linters: [ revive, staticcheck ]
+    # The documentation's Ginkgo samples are written the way Ginkgo suites are: dot imports,
+    # suite-level state, and specs that Ginkgo schedules instead of t.Parallel.
+    - path: '^website/examples/(envtest|ginkgo)/'
+      linters: [ gochecknoglobals, paralleltest ]
+    - path: '^website/examples/(envtest|ginkgo)/'
+      text: 'dot-imports'
+      linters: [ revive ]
     - path: '_test\.go'
       linters:
       - bodyclose

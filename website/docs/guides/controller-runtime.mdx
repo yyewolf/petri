@@ -1,0 +1,46 @@
+---
+sidebar_position: 9
+description: Run controller-runtime managers and reconcilers against petri.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Manager from '!!raw-loader!@site/examples/manager/manager_test.go';
+
+# controller-runtime
+
+The `github.com/yyewolf/petri/controllerruntime` module wires petri into
+[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime). It
+is a separate module so that petri itself does not depend on controller-runtime:
+
+```bash
+go get github.com/yyewolf/petri/controllerruntime@v0.37
+```
+
+Its version follows petri's and carries the controller-runtime release built
+for the same Kubernetes minor.
+
+## Running a manager
+
+<CodeBlock language="go" title="manager_test.go">{Manager}</CodeBlock>
+
+- `petricr.NewManager(t, cfg, options...)` builds a manager for tests: metrics
+  and health probes off, so parallel tests never compete for ports, and no
+  leader election. `petricr.WithScheme(scheme)` sets the scheme for your API
+  types; `petricr.WithWebhookServer(server)` attaches a webhook server, for
+  example one serving from [`cp.ServingCertDir(t)`](webhooks.mdx).
+- `petricr.StartManager(t, mgr)` starts it, returns once its caches have
+  synced, stops it when the test ends, and fails the test if the manager exits
+  early. Once stopped, the manager leaves no goroutines behind.
+- `petricr.WaitFor(t, client, obj, condition)` is [`petri.WaitFor`](waiting.mdx)
+  for controller-runtime clients: it follows `obj` by its name and namespace and
+  returns it once the condition holds. `petricr.WaitUntil(ctx, ...)` returns
+  an error instead.
+
+On the shared plane a manager sees every test's objects. Filter your
+controller to the test's namespace, as the example does, or run it on a
+[dedicated plane](control-planes.mdx#dedicated-control-planes).
+
+## Existing envtest suites
+
+If your suite already uses envtest's `Environment`, you do not need to rewrite
+it: see [migrating from envtest](migrating-from-envtest.mdx).

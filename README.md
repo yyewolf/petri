@@ -69,10 +69,10 @@ func TestDeploymentIsReconciled(t *testing.T) {
 `petri.Start(t)` starts one control plane for the whole test binary, in about
 two seconds; each test works in its own namespace. From there:
 
-- [CRDs](https://yyewolf.github.io/petri/docs/guides/crds) and [webhooks](https://yyewolf.github.io/petri/docs/guides/webhooks), installed per test.
-- [Built-in controllers](https://yyewolf.github.io/petri/docs/guides/controllers): namespace deletion and garbage collection by default, workload controllers on demand.
-- [Simulated Nodes and kube-scheduler](https://yyewolf.github.io/petri/docs/guides/nodes), or [Pods placed by the test](https://yyewolf.github.io/petri/docs/guides/pod-expectations), gomock-style.
-- [controller-runtime](https://yyewolf.github.io/petri/docs/guides/controller-runtime) and an [envtest drop-in](https://yyewolf.github.io/petri/docs/guides/migrating-from-envtest): change one import.
+- [CRDs](https://yyewolf.github.io/petri/docs/guides/crds/) and [webhooks](https://yyewolf.github.io/petri/docs/guides/webhooks/), installed per test.
+- [Built-in controllers](https://yyewolf.github.io/petri/docs/guides/controllers/): namespace deletion and garbage collection by default, workload controllers on demand.
+- [Simulated Nodes and kube-scheduler](https://yyewolf.github.io/petri/docs/guides/nodes/), or [Pods placed by the test](https://yyewolf.github.io/petri/docs/guides/pod-expectations/), gomock-style.
+- [controller-runtime](https://yyewolf.github.io/petri/docs/guides/controller-runtime/) and an [envtest drop-in](https://yyewolf.github.io/petri/docs/guides/migrating-from-envtest/): change one import.
 
 ## Documentation
 

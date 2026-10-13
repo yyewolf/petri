@@ -13,14 +13,13 @@ import (
 var _ = Describe("Owner references", func() {
 	var configMaps typedcorev1.ConfigMapInterface
 
-	BeforeEach(func(ctx SpecContext) {
-		ns, err := cp.NewNamespace(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx SpecContext) error {
-			return cp.Client().CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
-		})
-
-		configMaps = cp.Client().CoreV1().ConfigMaps(ns)
+	BeforeEach(func() {
+		// GinkgoTB adapts the running spec to testing.TB, so petri's helpers
+		// work as in a plain test: the shared plane, and a namespace that is
+		// deleted when the spec ends.
+		t := GinkgoTB()
+		cp := petri.Start(t)
+		configMaps = cp.Client().CoreV1().ConfigMaps(cp.Namespace(t))
 	})
 
 	It("cascade to dependents", func(ctx SpecContext) {
@@ -41,7 +40,6 @@ var _ = Describe("Owner references", func() {
 
 		Expect(configMaps.Delete(ctx, owner.Name, metav1.DeleteOptions{})).To(Succeed())
 
-		_, err = petri.WaitUntil(ctx, configMaps, "dependent", petri.Deleted[*corev1.ConfigMap]())
-		Expect(err).NotTo(HaveOccurred())
+		petri.WaitFor(GinkgoTB(), configMaps, "dependent", petri.Deleted[*corev1.ConfigMap]())
 	})
 })

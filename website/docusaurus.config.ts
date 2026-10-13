@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
@@ -18,6 +18,18 @@ function currentLine(): string {
   return `0.${match[1]}`;
 }
 
+// Older release lines frozen by scripts/version-docs.sh. They still get
+// Kubernetes patch releases on their release-1.N branches, so Docusaurus's
+// "no longer maintained" banner would be wrong.
+function frozenLines(): Record<string, {banner: 'none'}> {
+  const file = fileURLToPath(new URL('./versions.json', import.meta.url));
+  if (!existsSync(file)) {
+    return {};
+  }
+  const lines: string[] = JSON.parse(readFileSync(file, 'utf8'));
+  return Object.fromEntries(lines.map((line) => [line, {banner: 'none'}]));
+}
+
 const repo = 'https://github.com/yyewolf/petri';
 
 const config: Config = {
@@ -27,7 +39,9 @@ const config: Config = {
 
   url: 'https://yyewolf.github.io',
   baseUrl: '/petri/',
-  trailingSlash: false,
+  // GitHub Pages serves /petri/docs/ from docs/index.html, so every route is
+  // built as a directory and linked with its trailing slash.
+  trailingSlash: true,
   organizationName: 'yyewolf',
   projectName: 'petri',
 
@@ -57,6 +71,7 @@ const config: Config = {
               label: currentLine(),
               path: '',
             },
+            ...frozenLines(),
           },
         },
         blog: false,

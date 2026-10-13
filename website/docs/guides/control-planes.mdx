@@ -45,7 +45,8 @@ needs the cluster to itself:
 <CodeBlock language="go" title="dedicated_test.go">{Dedicated}</CodeBlock>
 
 The context bounds startup only. `Stop` shuts the plane down and returns once
-every goroutine it started has exited; calling it again returns nil. Several
+every goroutine it started has exited; calling it again returns the same
+result. Several
 dedicated planes can run at once, in parallel tests, without seeing each
 other.
 

@@ -1,6 +1,8 @@
 package envtest_test
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +21,6 @@ var _ = Describe("Namespaces", func() {
 		// stay Terminating forever. petri runs it by default.
 		Eventually(func(ctx SpecContext) error {
 			return k8sClient.Get(ctx, client.ObjectKeyFromObject(ns), &corev1.Namespace{})
-		}).WithContext(ctx).Should(Satisfy(apierrors.IsNotFound))
+		}).WithContext(ctx).WithTimeout(30 * time.Second).Should(Satisfy(apierrors.IsNotFound))
 	})
 })

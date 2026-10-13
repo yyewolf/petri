@@ -85,7 +85,10 @@ func TestWidgetBecomesARunningDeployment(t *testing.T) {
 	mgr := petricr.NewManager(t, cp.Config())
 	widgets := &unstructured.Unstructured{}
 	widgets.SetGroupVersionKind(widgetKind())
+	// Controller names are unique per process: name it after the test so
+	// other tests in the package can run their own.
 	err = ctrl.NewControllerManagedBy(mgr).
+		Named("widget-" + t.Name()).
 		For(widgets).
 		Owns(&appsv1.Deployment{}).
 		Complete(&widgetReconciler{Client: mgr.GetClient()})

@@ -31,5 +31,6 @@ description: What petri does not do.
 - **Storage is kine's in-memory driver**, not etcd. It behaves like etcd for
   everything kube-apiserver does, but etcd-specific edge cases such as
   compaction timing may differ.
-- **Ginkgo specs cannot use the shared plane**, which needs a `testing.TB`; see
+- **Frameworks without a `testing.TB` cannot use the shared plane or
+  `EnableControllers`.** Ginkgo can, through `GinkgoTB()`; see
   [Ginkgo and other frameworks](../guides/frameworks.mdx).

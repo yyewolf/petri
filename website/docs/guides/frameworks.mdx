@@ -1,6 +1,6 @@
 ---
 sidebar_position: 11
-description: Use petri from Ginkgo and other frameworks without a testing.T.
+description: Use petri from Ginkgo and from frameworks without a testing.T.
 ---
 
 import CodeBlock from '@theme/CodeBlock';
@@ -9,14 +9,24 @@ import Spec from '!!raw-loader!@site/examples/ginkgo/collection_test.go';
 
 # Ginkgo and other frameworks
 
-Most petri helpers take a `testing.TB` and fail the test themselves. Ginkgo
-specs, and other frameworks with their own runner, do not have one: Ginkgo's
-`GinkgoT()` is not a `testing.TB`. For them, every helper has a variant that
-takes a context and returns an error.
+## Ginkgo
+
+Ginkgo's `GinkgoTB()` adapts the running spec to a `testing.TB`, so petri's
+helpers work in specs as they do in plain tests, the shared plane included.
+Cleanups petri registers, such as deleting the test's namespace, run when the
+spec ends.
 
 <CodeBlock language="go" title="suite_test.go">{Suite}</CodeBlock>
 
 <CodeBlock language="go" title="collection_test.go">{Spec}</CodeBlock>
+
+A kubebuilder suite built on envtest needs none of this: switch to the
+[envtest drop-in](migrating-from-envtest.mdx) and keep the suite as it is.
+
+## Without a testing.TB
+
+For frameworks that cannot provide a `testing.TB`, most helpers have a variant
+that takes a context and returns an error:
 
 | With a `testing.TB` | Context variant |
 |---|---|
@@ -33,12 +43,6 @@ takes a context and returns an error.
 | `cp.ExpectPods(t, ...)` | `cp.ExpectPodsCtx(ctx, ...)`, then `Verify(ctx)` |
 | `cp.StrictPods(t)` | `cp.StrictPodsCtx(ctx)`, then `cp.UnexpectedPods()` |
 
-The `t` variants register cleanups with the test; the context variants leave
-cleanup to you, for example with Ginkgo's `DeferCleanup`.
-
-The shared plane is only available through `petri.Start(t)`. A Ginkgo suite
-starts a dedicated plane in `BeforeSuite`, which costs about two seconds once
-per suite.
-
-With the [envtest drop-in](migrating-from-envtest.mdx), a kubebuilder Ginkgo
-suite needs none of this: change the import and keep the suite as it is.
+`cp.EnableControllers` has no context variant: it needs a `testing.TB`. The
+shared plane does too; without one, start a dedicated plane with `petri.New`.
+The context variants leave cleanup to you.

@@ -31,7 +31,7 @@ the test ends. Every option is optional:
 
 | Option | Default |
 |---|---|
-| `Name` | `petri-node-<n>` |
+| `Name` | `petri-node-` and a random suffix; set it when the test needs to know the name |
 | `Labels`, `Annotations` | yours, plus the well-known `kubernetes.io/hostname`, `kubernetes.io/os` (`linux`) and `kubernetes.io/arch` (`amd64`) labels |
 | `Taints` | none |
 | `Capacity` | 32 CPUs, 256Gi of memory, 1Ti of ephemeral storage, 110 Pods |

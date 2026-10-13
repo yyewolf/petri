@@ -101,6 +101,8 @@ run v1.38.0 v1.38.0 success success "" minor success
 logged "pr create --base main --head mirror/main --title build: mirror Kubernetes v1.38.0" || fail "no pr create"
 logged "--draft" && fail "opened as draft"
 grep -qF "controllerruntime sub-module was bumped" "$tmp/gh.log" || fail "body does not report the sub-module bump"
+[[ "$(git -C "$tmp/remote.git" log -1 --format=%B mirror/main)" == *"Release-As: 0.38.0"* ]] ||
+	fail "commit lacks the Release-As footer: $(git -C "$tmp/remote.git" log -1 --format=%B mirror/main)"
 
 case="minor update without a controller-runtime release opens a draft and asks for a human"
 run v1.38.1 v1.38.1 success success "8 false" minor none
@@ -118,6 +120,7 @@ logged "pr ready 9 --undo" || fail "failed bump did not open as draft"
 case="patch update does not mention the sub-module"
 run v1.37.6 v1.37.6 success success "" patch success
 grep -qF "controllerruntime" "$tmp/gh.log" && fail "body mentions the sub-module on a patch"
+[[ "$(git -C "$tmp/remote.git" log -1 --format=%B mirror/main)" == *Release-As* ]] && fail "patch commit carries Release-As"
 
 case="kine-only update is titled after kine and names both versions in the command"
 git -C "$tmp/remote.git" update-ref -d refs/heads/mirror/main

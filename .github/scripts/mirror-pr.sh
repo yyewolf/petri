@@ -38,9 +38,17 @@ else
 	title="build: mirror Kubernetes $VERSION"
 fi
 
+# A new minor starts a new petri release line: release-please would otherwise
+# propose the next patch of the previous one.
+message=("-m" "$title")
+if [[ "$KIND" == minor ]]; then
+	minor=$(sed -n 's/^v1\.\([0-9]*\)\..*/\1/p' <<<"$VERSION")
+	message+=("-m" "Release-As: 0.$minor.0")
+fi
+
 git switch -q -C "$head"
 git add -A
-git -c user.name=petri-mirror -c user.email=petri-mirror@users.noreply.github.com commit -q -m "$title"
+git -c user.name=petri-mirror -c user.email=petri-mirror@users.noreply.github.com commit -q "${message[@]}"
 
 # Skip the push when the branch already holds this exact content, so the daily
 # run does not re-trigger CI on an unchanged PR.

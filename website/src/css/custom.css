@@ -1,0 +1,39 @@
+/* petri's palette: agar amber on a neutral base. */
+:root {
+  --ifm-color-primary: #b45309;
+  --ifm-color-primary-dark: #a24b08;
+  --ifm-color-primary-darker: #994707;
+  --ifm-color-primary-darkest: #7e3a06;
+  --ifm-color-primary-light: #c65b0a;
+  --ifm-color-primary-lighter: #cf5f0b;
+  --ifm-color-primary-lightest: #ec6c0c;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #f59e0b;
+  --ifm-color-primary-dark: #e08e0a;
+  --ifm-color-primary-darker: #d48609;
+  --ifm-color-primary-darkest: #ae6e08;
+  --ifm-color-primary-light: #f6a826;
+  --ifm-color-primary-lighter: #f7ad33;
+  --ifm-color-primary-lightest: #f8bd5a;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+.hero--petri {
+  padding: 4rem 0;
+  text-align: center;
+}
+
+.hero--petri .buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.features {
+  padding: 2rem 0 4rem;
+}

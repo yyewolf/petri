@@ -10,7 +10,7 @@ on:
   push:
     branches:
       - main
-      - "release-*"
+      - "release-1.*"
 
 # The workflow token does everything, but GitHub starts no workflow for its
 # pushes and PRs, so CI is dispatched explicitly: on the release PR's branch

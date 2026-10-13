@@ -1,0 +1,62 @@
+---
+sidebar_position: 4
+description: Install CustomResourceDefinitions from files, embedded manifests or objects.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Install from '!!raw-loader!@site/examples/crds/install_test.go';
+import Status from '!!raw-loader!@site/examples/crds/status_test.go';
+import Manifest from '!!raw-loader!@site/examples/crds/testdata/widgets.yaml';
+
+# CRDs
+
+`cp.InstallCRDs(t, sources...)` installs CustomResourceDefinitions and returns
+once each one is `Established` and its resources are served by discovery. A
+RESTMapper or client built on the next line resolves the new kinds; there is
+no stale-discovery window to wait out.
+
+<CodeBlock language="go" title="install_test.go">{Install}</CodeBlock>
+
+<CodeBlock language="yaml" title="testdata/widgets.yaml">{Manifest}</CodeBlock>
+
+## Sources
+
+Each source can be:
+
+- a path to a file or a directory, read recursively,
+- an `fs.FS`, so manifests embedded with `//go:embed` work,
+- a `*apiextensionsv1.CustomResourceDefinition` object.
+
+Files are YAML or JSON, multi-document files included. Documents that are not
+CRDs are skipped, as envtest does, so you can point it at a directory of mixed
+manifests such as kubebuilder's `config/crd/bases`.
+
+## Installing from many tests
+
+Call `InstallCRDs` in every test that needs the CRDs, not once in `TestMain`.
+Installing is idempotent and safe from parallel tests:
+
+- a CRD that does not exist yet is created;
+- a CRD that exists with an equivalent spec, compared after the API server's
+  defaulting, is left alone;
+- a CRD that exists with a different spec fails the test, with a diff.
+
+CRDs are never deleted. On the shared plane, other tests may still be using
+them.
+
+## Waiting on custom resources
+
+Custom resources have no typed client unless you generate one. Wrap a dynamic
+client's resource with `petri.DynamicResource` to use the
+[wait helpers](waiting.mdx) on them:
+
+<CodeBlock language="go" title="status_test.go">{Status}</CodeBlock>
+
+The namespace controller and the garbage collector handle custom resources too,
+including those of CRDs installed after the plane started: deleting a
+namespace removes them, and owner references on them cascade.
+
+## Without a testing.T
+
+[`cp.InstallCRDsCtx(ctx, sources...)`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.InstallCRDsCtx) returns an error instead of failing a
+test.

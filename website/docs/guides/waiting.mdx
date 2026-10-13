@@ -1,0 +1,57 @@
+---
+sidebar_position: 3
+description: Wait for an object to reach a state, or for anything else to become true.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Deleted from '!!raw-loader!@site/examples/waiting/deleted_test.go';
+import Retry from '!!raw-loader!@site/examples/waiting/retry_test.go';
+
+# Waiting
+
+Controllers act asynchronously, so tests wait for outcomes. petri's waits are
+built for that: no sleeps, no polling loops of your own.
+
+## Waiting for one object
+
+`petri.WaitFor(t, client, name, condition)` follows one object until the
+condition holds, and fails the test if it does not within 30 seconds. The
+client is any typed client-go resource client, such as
+`cs.AppsV1().Deployments(ns)`.
+
+<CodeBlock language="go" title="deleted_test.go">{Deleted}</CodeBlock>
+
+The wait lists then watches from the object's resourceVersion, so a change made
+just before the wait is not missed, and it re-establishes the watch when it
+expires. On timeout, the failure shows the last state it observed.
+
+A condition is a `func(O) (bool, error)`. It receives `nil` while the object
+does not exist. Returning an error ends the wait with that error. Ready-made
+ones:
+
+| Condition | Holds when |
+|---|---|
+| `petri.Exists[O]()` | the object exists |
+| `petri.Deleted[O]()` | the object does not exist |
+| `petri.StatusCondition[O](type, status)` | `status.conditions[type]` has that status, for any object whose conditions have string `type` and `status` fields |
+
+[`petri.WithTimeout(d)`](https://pkg.go.dev/github.com/yyewolf/petri#WithTimeout) changes the 30-second default. A context deadline that
+comes sooner still wins.
+
+For custom resources without a typed client, wrap a dynamic
+`ResourceInterface` with `petri.DynamicResource`; the [CRDs](crds.mdx) guide
+has an example.
+
+## Waiting for anything else
+
+`petri.Retry(t, func(ctx) (bool, error))` polls a condition you write until it
+returns true, for outcomes that are not one named object:
+
+<CodeBlock language="go" title="retry_test.go">{Retry}</CodeBlock>
+
+## Without a testing.T
+
+[`petri.WaitUntil(ctx, client, name, condition)`](https://pkg.go.dev/github.com/yyewolf/petri#WaitUntil) and
+[`petri.RetryUntil(ctx, condition)`](https://pkg.go.dev/github.com/yyewolf/petri#RetryUntil) do the same and return an error instead of
+failing a test. `WaitUntil` also returns the last object it observed. See
+[Ginkgo and other frameworks](frameworks.mdx).

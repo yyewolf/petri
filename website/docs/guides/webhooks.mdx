@@ -1,0 +1,63 @@
+---
+sidebar_position: 5
+description: Run admission and conversion webhooks against the control plane.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Admission from '!!raw-loader!@site/examples/webhooks/admission_test.go';
+import Manifests from '!!raw-loader!@site/examples/webhooks/testdata/manifests.yaml';
+
+# Webhooks
+
+The API server calls webhooks over HTTPS. petri generates a webhook CA for each
+control plane and gives you two things to wire a local webhook server to it: a
+serving certificate the API server trusts, and installers that point your
+webhook configurations at your server.
+
+## Admission webhooks
+
+<CodeBlock language="go" title="admission_test.go">{Admission}</CodeBlock>
+
+<CodeBlock language="yaml" title="testdata/manifests.yaml">{Manifests}</CodeBlock>
+
+- `cp.ServingCertDir(t)` writes `tls.crt` and `tls.key` for `127.0.0.1` and
+  `localhost`, signed by the plane's CA. A controller-runtime webhook server
+  loads them as they are through its `CertDir` option. The directory is removed
+  with the test; it is the only thing petri ever writes to disk.
+- `cp.InstallAdmissionWebhooks(t, options, sources...)` takes the same kinds of
+  sources as [InstallCRDs](crds.mdx) and installs the mutating and validating
+  webhook configurations it finds. Each service-based webhook is rewritten to
+  `options.Host` and `options.Port`, keeping its path, and gets the plane's CA
+  as its `caBundle`.
+- Each configuration is installed under a unique name and deleted when the test
+  ends, so parallel tests can install the same manifests.
+- `options.Namespace` limits every webhook to one namespace, merged into any
+  selector the manifest already has. Leave it empty only for webhooks that must
+  see the whole cluster: on the shared plane, an unscoped webhook fires for
+  every test's objects.
+- [`cp.WebhookCABundle()`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.WebhookCABundle) returns the CA, for configurations that carry their
+  own URL.
+
+The API server learns about new webhook configurations through a watch, so the
+first requests after installing may not reach the webhook yet. Retry the first
+request that depends on it, as the example does.
+
+## Conversion webhooks
+
+Install the CRDs first, with their `conversion.webhook` section as your
+project generates it, then call
+[`cp.InstallConversionWebhooks`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.InstallConversionWebhooks)
+with the CRD names and a `petri.ConversionWebhookOptions{Host, Port}`.
+It patches each named CRD's conversion webhook to point at your server, keeping
+the path, and sets the plane's CA as the `caBundle`. CRDs whose webhook carries
+its own URL are left untouched.
+
+A CRD applies to the whole plane, so conversion webhooks are only allowed on a
+[dedicated plane](control-planes.mdx#dedicated-control-planes): the shared
+plane refuses them.
+
+## Without a testing.T
+
+[`InstallAdmissionWebhooksCtx`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.InstallAdmissionWebhooksCtx) returns an error and a cleanup function that
+removes the configurations; [`InstallConversionWebhooksCtx`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.InstallConversionWebhooksCtx) returns an error.
+[`WriteServingCert(dir)`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.WriteServingCert) writes the serving pair to a directory you manage.

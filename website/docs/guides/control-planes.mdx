@@ -1,0 +1,75 @@
+---
+sidebar_position: 1
+description: The shared control plane, dedicated ones, and how they start and stop.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Shared from '!!raw-loader!@site/examples/controlplanes/shared_test.go';
+import Dedicated from '!!raw-loader!@site/examples/controlplanes/dedicated_test.go';
+
+# Control planes
+
+A petri control plane is kube-apiserver, upstream's own code, compiled into
+your test binary and serving from memory on a loopback port. Storage is kine's
+in-memory etcd stand-in, and certificates and keys are generated at startup.
+Nothing is downloaded or written to disk.
+
+There are two ways to get one.
+
+## The shared control plane
+
+`petri.Start(t)` returns one control plane for the whole test binary. The
+first call starts it, about two seconds, and every later call returns the same
+plane. It is never stopped: process exit is the teardown.
+
+<CodeBlock language="go" title="shared_test.go">{Shared}</CodeBlock>
+
+Tests on the shared plane stay apart by working in their own namespace (see
+[namespaces and clients](namespaces-and-clients.mdx)). Anything cluster-wide is
+additive and shared: CRDs a test installs and controllers it enables stay for
+every later test, and installing or enabling again is safe. Write tests so they
+do not depend on being alone on the plane.
+
+If startup fails, `Start` fails the test with the control plane's logs, and
+every later `Start` call in the binary reports the same failure.
+
+## Dedicated control planes
+
+`petri.New(ctx)` starts a plane that belongs to the caller. Use one when a test
+needs the cluster to itself:
+
+- [Nodes and the scheduler](nodes.mdx), which only exist on dedicated planes,
+- envtest semantics, with `petri.WithoutDefaultControllers()`,
+- cluster-wide state the test must own, such as CRD conversion webhooks.
+
+<CodeBlock language="go" title="dedicated_test.go">{Dedicated}</CodeBlock>
+
+The context bounds startup only. `Stop` shuts the plane down and returns once
+every goroutine it started has exited; calling it again returns nil. Several
+dedicated planes can run at once, in parallel tests, without seeing each
+other.
+
+## What runs by default
+
+Every plane, shared or dedicated, runs the namespace controller and the
+garbage collector, and `Start` and `New` return once their informers are
+synced. A deleted namespace really goes away, and deleting an owner deletes its
+dependents. Other controllers are off until a test enables them; see
+[built-in controllers](controllers.mdx).
+
+`petri.WithoutDefaultControllers()` starts a dedicated plane without the two,
+for tests written against envtest's behaviour, where deleted namespaces stay
+`Terminating` and dependents survive their owner. The shared plane always runs
+them.
+
+The API server runs upstream admission with one exception: the
+`ServiceAccount` admission plugin is off, as in envtest, so creating a Pod in a
+fresh namespace does not wait for its `default` ServiceAccount. Enable the
+ServiceAccount controller if your code needs that account to exist.
+
+## Logs
+
+kube-apiserver and kine log through klog and logrus. petri sends both to a
+buffer that is printed when startup fails. Set `PETRI_VERBOSE=1` to also see
+them on stderr. The redirect is process-wide, so if your own code logs through
+klog or logrus, its output is redirected too.

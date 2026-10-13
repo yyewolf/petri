@@ -1,0 +1,44 @@
+---
+sidebar_position: 2
+description: A namespace per test, admin clients, and acting as another user.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Impersonation from '!!raw-loader!@site/examples/namespaces/impersonation_test.go';
+
+# Namespaces and clients
+
+## A namespace per test
+
+`cp.Namespace(t)` creates a namespace and deletes it when the test ends. Its
+name comes from the test's name plus a random suffix, so subtests and parallel
+tests never collide, and a name in a failure message tells you which test made
+the object:
+
+```text
+testteama-x7k2p
+```
+
+With the namespace controller running, which is the default, a deleted
+namespace is emptied and then removed, as on a cluster.
+
+[`cp.NewNamespace(ctx)`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.NewNamespace) creates one without a test: it takes a context, returns
+an error, and leaves deletion to you. Use it from frameworks that have no
+`testing.TB` at hand; see [Ginkgo and other frameworks](frameworks.mdx).
+
+## Clients
+
+- `cp.Config()` returns a new admin `*rest.Config` on every call, the
+  equivalent of envtest's `cfg`. Changing the copy you get never affects other
+  tests.
+- `cp.Client()` returns a shared admin `*kubernetes.Clientset`, built once per
+  plane.
+
+Admin means `system:masters`: every request is allowed. To test what a
+less privileged identity can do, impersonate it:
+
+<CodeBlock language="go" title="impersonation_test.go">{Impersonation}</CodeBlock>
+
+The API server runs the RBAC and Node authorizers, as a cluster does, so
+Roles, ClusterRoles and their bindings are enforced for any identity but the
+admin one.

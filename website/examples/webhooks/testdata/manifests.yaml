@@ -1,0 +1,20 @@
+# As a kubebuilder project generates it: the webhook points at an in-cluster
+# Service, which InstallAdmissionWebhooks rewrites to the test's server.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: require-owner
+webhooks:
+  - name: require-owner.example.com
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: system
+        path: /validate-configmap
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["configmaps"]

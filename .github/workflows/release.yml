@@ -77,6 +77,12 @@ jobs:
         working-directory: controllerruntime
         env:
           GOWORK: "off"
+          # The checkout's credentials live in this repository's git config;
+          # the go command fetches petri into its own module cache, so hand it
+          # the token for petri's URL only while the repository is private.
+          GIT_CONFIG_COUNT: ${{ github.event.repository.private && '1' || '0' }}
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ github.token }}@github.com/yyewolf/petri.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/yyewolf/petri
         run: |
           go mod edit -require="github.com/yyewolf/petri@$TAG"
           go mod tidy

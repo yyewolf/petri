@@ -3,6 +3,7 @@ go 1.26.0
 use (
 	.
 	./controllerruntime
+	./website/examples
 )
 
 // The workspace build would otherwise see two modules providing the

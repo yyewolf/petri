@@ -1,0 +1,60 @@
+---
+sidebar_position: 2
+description: Install petri and write a first test against the shared control plane.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Quickstart from '!!raw-loader!@site/examples/quickstart/quickstart_test.go';
+
+# Getting started
+
+## Install
+
+```bash
+go get github.com/yyewolf/petri@v0.37
+```
+
+petri needs Go 1.26 or newer, the same floor as Kubernetes 1.37.
+
+Use the petri minor that matches your `k8s.io/client-go` minor. One test binary
+links one API server, so the server always runs the Kubernetes version your
+client libraries target:
+
+| petri     | Kubernetes | `k8s.io/client-go` |
+|-----------|------------|--------------------|
+| `v0.37.x` | 1.37       | `v0.37.x`          |
+
+If you use controller-runtime, also add the sub-module, which carries the
+matching controller-runtime release:
+
+```bash
+go get github.com/yyewolf/petri/controllerruntime@v0.37
+```
+
+## A first test
+
+<CodeBlock language="go" title="quickstart_test.go">{Quickstart}</CodeBlock>
+
+- `petri.Start(t)` returns the control plane shared by every test in the test
+  binary, starting it on first use. There is nothing to set up in `TestMain`
+  and nothing to tear down.
+- `cp.Namespace(t)` gives each test its own namespace, so parallel tests do not
+  see each other's objects. The namespace is deleted when the test ends.
+- `cp.Client()` and `cp.Config()` give admin access, like envtest's config.
+- The namespace controller and the garbage collector always run. Other
+  controllers, such as the Deployment controller here, are enabled per test
+  with `EnableControllers`.
+- `petri.WaitFor` watches the object until the condition holds, and fails the
+  test if it does not within 30 seconds.
+
+## Run it
+
+```bash
+go test ./...
+```
+
+There are no binaries to download and no containers to start: the API server
+is compiled into the test binary. The first build compiles it and takes a few
+minutes; later runs use the build cache. The race detector instruments the
+API server too, so `-race` builds use noticeably more memory than with
+envtest.

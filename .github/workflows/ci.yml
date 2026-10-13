@@ -40,6 +40,7 @@ jobs:
           .github/scripts/check-release-tag_test.sh
           .github/scripts/bump-submodule_test.sh
           .github/scripts/mirror-pr_test.sh
+          website/scripts/version-docs_test.sh
 
   # A release PR must stay on the release line version.go declares: after a
   # Kubernetes minor move, the next release is v0.<new minor>.0, not a patch.

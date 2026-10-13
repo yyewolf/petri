@@ -83,6 +83,20 @@ empty commit:
 git commit --allow-empty -m "chore: release 0.38.0" -m "Release-As: 0.38.0"
 ```
 
+## Docs for each release line
+
+The documentation site (`website/`) is versioned by release line, like the
+code. `main`'s docs are the current version, labelled from `version.go`. When
+the Mirror workflow moves `main` to a new minor, the same PR runs
+`website/scripts/version-docs.sh 0.N` for the outgoing line: Docusaurus freezes
+the pages under `website/versioned_docs/version-0.N/`, and the samples they show
+are copied to `website/_versioned_examples/version-0.N/` so those pages keep
+the code of their own line. If the freeze fails, the PR opens as a draft that
+says so; run the script by hand from `website/` and push the result to the PR.
+
+Only `main` deploys the site. Fix an older line's docs in its
+`versioned_docs/version-0.N/` folder on `main`.
+
 ## Setup
 
 There is no secret to manage: the workflows use their own `GITHUB_TOKEN`. The

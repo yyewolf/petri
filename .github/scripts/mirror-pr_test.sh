@@ -45,7 +45,8 @@ run() {
 	export GIT_AUTHOR_DATE="@$((1700000000 + runs)) +0000" GIT_COMMITTER_DATE="@$((1700000000 + runs)) +0000"
 	status=0
 	(cd "$tmp/work" && BRANCH=main VERSION="$version" KIND="${6:-patch}" MIRROR_OUTCOME="$mirror" \
-		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" SUBMODULE_OUTCOME="${7:-}" KINE="${8:-}" "$script") \
+		TEST_OUTCOME="$tests" REMOTE="$tmp/remote.git" GH="$tmp/gh" SUBMODULE_OUTCOME="${7:-}" KINE="${8:-}" \
+		DOCS_OUTCOME="${DOCS_OUTCOME-success}" "$script") \
 		>"$tmp/out.log" 2>&1 || status=$?
 }
 remote_head() { git -C "$tmp/remote.git" rev-parse --verify -q refs/heads/mirror/main || true; }
@@ -119,6 +120,13 @@ grep -qF "could not be bumped" "$tmp/gh.log" || fail "body does not report the s
 logged "pr ready" && fail "changed draft state for a broken PR"
 run v1.38.2 v1.38.2 success success "9 false" minor failed
 logged "pr ready 9 --undo" || fail "failed bump did not open as draft"
+
+case="minor update whose docs freeze failed opens a draft and says so"
+git -C "$tmp/remote.git" update-ref -d refs/heads/mirror/main
+DOCS_OUTCOME=failure run v1.38.3 v1.38.3 success success "" minor success
+[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
+logged "--draft" || fail "not a draft: $(cat "$tmp/gh.log")"
+grep -qF "freezing the 1.37 docs" "$tmp/gh.log" || fail "body does not report the docs freeze: $(cat "$tmp/gh.log")"
 
 case="patch update does not mention the sub-module"
 run v1.37.6 v1.37.6 success success "" patch success

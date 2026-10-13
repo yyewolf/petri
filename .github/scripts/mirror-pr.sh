@@ -11,6 +11,7 @@
 #   TEST_OUTCOME     outcome of the tests; empty when they were skipped
 #   SUBMODULE_OUTCOME outcome of the controllerruntime bump on a minor move:
 #                    success, none (no controller-runtime release yet), skipped
+#   DOCS_OUTCOME     outcome of freezing the outgoing line's docs on a minor move
 #   REMOTE           URL to push to
 #   CI_WORKFLOW      workflow to dispatch on the PR branch after a push
 #                    (default ci.yml)
@@ -94,6 +95,11 @@ if [[ "$MIRROR_OUTCOME" != success || "${TEST_OUTCOME:-}" != success ]]; then
 	body="$body
 
 **Needs a human:** \`make mirror\` finished with \`$MIRROR_OUTCOME\` and \`go test -race ./...\` with \`${TEST_OUTCOME:-skipped}\`${RUN_URL:+ in [this run]($RUN_URL)}."
+elif [[ "$KIND" == minor && "${DOCS_OUTCOME:-}" != success ]]; then
+	broken=true
+	body="$body
+
+**Needs a human:** freezing the 1.$((minor - 1)) docs (\`website/scripts/version-docs.sh 0.$((minor - 1))\`) finished with \`${DOCS_OUTCOME:-skipped}\`${RUN_URL:+, see [this run]($RUN_URL)}."
 elif [[ "$KIND" == minor && "${SUBMODULE_OUTCOME:-}" != success && "${SUBMODULE_OUTCOME:-}" != "" ]]; then
 	broken=true
 	body="$body

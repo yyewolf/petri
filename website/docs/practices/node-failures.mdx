@@ -1,0 +1,45 @@
+---
+sidebar_position: 4
+description: Make Nodes fail and drain them, and check your code copes.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import NotReady from '!!raw-loader!@site/examples/nodes/notready_test.go';
+import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
+
+# Simulating Node failures
+
+Code that runs on a cluster has to cope with Nodes going away: an operator
+that manages stateful workloads, a controller that reschedules work, anything
+with a PodDisruptionBudget. petri lets a test cause each failure on purpose and
+in order, on a [dedicated plane with Nodes](../guides/nodes.mdx).
+
+## What you can cause
+
+| Failure | How |
+|---|---|
+| The kubelet stops reporting | `node.SetReady(t, false)`: the Node turns NotReady, gets the `not-ready` taint, and its Pods freeze. |
+| An administrator drains the Node | `node.Drain(t)`: cordon, then evict through the Eviction API, honouring budgets. |
+| A Pod is evicted | `cp.Evict(t, pod)`, refused while a budget forbids it. |
+| The Node disappears | `node.Delete(t)`: its Pods are force-deleted, as the Pod garbage collector does. |
+| A Pod's process exits | `cp.FailPod(t, pod, exitCode)` or `cp.CompletePod(t, pod)`. |
+| A Pod stops being ready | `cp.SetPodReady(t, pod, false)`. |
+
+## A NotReady Node
+
+<CodeBlock language="go" title="notready_test.go">{NotReady}</CodeBlock>
+
+To check that something does not happen, wait for it with a short timeout and
+expect the wait to fail, as the test does for the Pod that must not start.
+
+## Draining under a budget
+
+<CodeBlock language="go" title="drain_test.go">{Drain}</CodeBlock>
+
+## What petri leaves to you
+
+petri runs no node lifecycle controller. A NotReady Node is never tainted
+`NoExecute` and its Pods are never evicted on their own, so a test that needs
+that behaviour performs it: evict or delete the Pods, or delete the Node, at
+the point the test chooses. That keeps failure tests deterministic: nothing
+happens on a timer.

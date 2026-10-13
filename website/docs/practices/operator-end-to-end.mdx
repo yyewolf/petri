@@ -1,0 +1,41 @@
+---
+sidebar_position: 3
+description: Test an operator the way it runs, from custom resource to running Pods.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Operator from '!!raw-loader!@site/examples/operator/operator_test.go';
+
+# Testing an operator end to end
+
+An operator's job is rarely done when it has created an object: it is done when
+what it created works. With petri a test can follow the whole chain, from the
+custom resource a user creates to Pods running on Nodes, in one process and a
+few seconds.
+
+<CodeBlock language="go" title="operator_test.go">{Operator}</CodeBlock>
+
+The test assembles the cluster the operator expects, no more:
+
+- the operator's CRDs, with [`InstallCRDs`](../guides/crds.mdx);
+- Nodes and kube-scheduler, so Pods run;
+  see [Nodes and scheduling](../guides/nodes.mdx);
+- the built-in controllers between the operator's output and running Pods,
+  here Deployment and ReplicaSet;
+- the operator itself, started like its `main` starts it, with
+  [the Manager helper](../guides/controller-runtime.mdx).
+
+Then it acts as a user would and waits for the outcome a user cares about.
+
+## Choosing how far to go
+
+Not every test needs the whole chain. Pick the cheapest setup that still
+exercises the behaviour:
+
+| To test… | Use |
+|---|---|
+| the objects the operator creates | the shared plane, no Nodes: assert on the Deployment spec |
+| status the operator reports from Pods | a dedicated plane with Nodes, and [manual placement](../guides/pod-expectations.mdx) to control which Pods run |
+| scheduling-dependent behaviour (affinity, spread) | a dedicated plane with Nodes and `SchedulerController` |
+| reactions to Node failures | a dedicated plane; see [simulating Node failures](node-failures.mdx) |
+| admission behaviour | [webhooks](../guides/webhooks.mdx) on the shared plane, scoped to the test's namespace |

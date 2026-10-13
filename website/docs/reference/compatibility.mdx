@@ -1,0 +1,44 @@
+---
+sidebar_position: 1
+description: Which petri version to use, and what it supports.
+---
+
+# Compatibility and versioning
+
+## Versions
+
+petri versions follow the `k8s.io` staging modules. Use the petri minor that
+matches your `k8s.io/client-go` minor:
+
+| petri | Kubernetes | `k8s.io/client-go` | controller-runtime (via `petri/controllerruntime`) |
+|---|---|---|---|
+| `v0.37.x` | 1.37 | `v0.37.x` | `v0.25.x` |
+
+- The patch number goes up with every petri release, for any change.
+- There is no `v1`, and there never is a petri minor without a Kubernetes minor
+  behind it.
+- `petri.KubernetesVersion` reports the Kubernetes minor a build targets.
+- The `controllerruntime` module is released with every petri release under
+  the same version, tagged `controllerruntime/v0.N.P`.
+
+The newest Kubernetes minor is developed on `main`; older minors keep getting
+Kubernetes patch updates on `release-1.N` branches, and their docs stay
+available from the version menu.
+
+## One version per test binary
+
+The API server is compiled into your test binary, from the same `k8s.io`
+modules your code uses, so its version always matches your client libraries.
+You cannot pick a different server version at runtime, and version-skew
+testing, a client against an older or newer server, is out of scope. envtest
+can do that because its API server is a separate binary.
+
+## Go
+
+petri needs the Go version its Kubernetes release needs, and never a newer
+one: Go 1.26 for Kubernetes 1.37.
+
+## Platforms
+
+petri is tested on Linux and macOS, on amd64 and arm64, and builds for
+Windows.

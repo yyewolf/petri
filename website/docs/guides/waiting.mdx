@@ -9,8 +9,9 @@ import Retry from '!!raw-loader!@site/examples/waiting/retry_test.go';
 
 # Waiting
 
-Controllers act asynchronously, so tests wait for outcomes. petri's waits are
-built for that: no sleeps, no polling loops of your own.
+Controllers act asynchronously, so tests wait for outcomes. petri's waits
+watch the API server and return as soon as the outcome is there, so a test
+needs neither sleeps nor polling loops of its own.
 
 ## Waiting for one object
 

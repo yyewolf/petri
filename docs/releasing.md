@@ -48,7 +48,8 @@ the rest):
    shows up in the next petri release on its own.
 
 2. **release-please keeps a release PR open.** After each push, it opens or
-   updates the PR `chore: release 0.37.N` from `release-please--branches--<branch>`,
+   updates the PR `chore: release 0.37.N` (`chore(release-1.N): …` on a
+   release branch) from `release-please--branches--<branch>`,
    with the `CHANGELOG.md` section for the commits since the last release.
    Edit the PR to reword the changelog if needed. CI checks that the PR's
    version belongs to the release line in `version.go`.

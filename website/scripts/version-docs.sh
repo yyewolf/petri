@@ -36,8 +36,9 @@ mkdir -p "$frozen_examples"
 		cp "examples/$file" "$frozen_examples/$file"
 	done
 
-# Point the frozen pages at the frozen samples.
-grep -rlF '@site/examples/' "$frozen_docs" | while IFS= read -r page; do
+# Point the frozen pages at the frozen samples. grep finding no page is fine:
+# the || true keeps pipefail from ending the script there.
+{ grep -rlF '@site/examples/' "$frozen_docs" || true; } | while IFS= read -r page; do
 	sed -i.bak "s|@site/examples/|@site/$frozen_examples/|g" "$page"
 	rm -f "$page.bak"
 done

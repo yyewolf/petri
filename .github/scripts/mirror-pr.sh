@@ -68,7 +68,7 @@ body="Regenerated with \`$command\` by the Mirror workflow."
 if [[ "$KIND" == minor ]]; then
 	body="$body
 
-This moves \`$BRANCH\` to a new Kubernetes minor. The previous minor continues on its \`release-1.N\` branch. Check whether the Go version or kine also need a bump."
+This moves \`$BRANCH\` to a new Kubernetes minor. The previous minor continues on its \`release-1.N\` branch. Check whether the Go version or kine also need a bump, and update the docs' install commands and version table to the new line (\`.github/scripts/check-doc-versions.sh\` fails until the install commands are)."
 
 	case "${SUBMODULE_OUTCOME:-}" in
 	success)

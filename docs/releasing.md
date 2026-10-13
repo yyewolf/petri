@@ -73,7 +73,10 @@ it against the working tree.
 
 ## A new Kubernetes minor
 
-When the Mirror workflow moves `main` to Kubernetes 1.38, its commit carries a
+When the Mirror workflow moves `main` to Kubernetes 1.38, update the install
+commands (`@v0.38`) and the version table in the README and `website/docs` in
+that PR; `.github/scripts/check-doc-versions.sh` fails CI until the install
+commands match. The commit also carries a
 `Release-As: 0.38.0` footer, so the next release PR proposes `v0.38.0` instead
 of the next 1.37 patch. If that footer gets lost, for example because the
 merge rewrote the message, the release PR's CI check fails. Fix it with an

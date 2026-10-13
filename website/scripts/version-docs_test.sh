@@ -56,6 +56,13 @@ grep -qF "@site/examples/" "$frozen" && fail "frozen page still imports live sam
 [[ -e "$tmp/site/_versioned_examples/version-0.37/go.mod" ]] && fail "go.mod copied: the frozen copy must not be a module"
 grep -qF "@site/examples/nodes/drain_test.go" "$tmp/site/docs/guides/nodes.mdx" || fail "current docs were rewritten"
 
+case="freezes docs whose pages import no samples"
+seed
+printf '# Plain page\n' >"$tmp/site/docs/guides/nodes.mdx"
+run 0.37
+[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
+grep -qF 'froze docs 0.37' "$tmp/out.log" || fail "stopped before finishing: $(cat "$tmp/out.log")"
+
 case="refuses a version that is not 0.N"
 seed
 run 1.37

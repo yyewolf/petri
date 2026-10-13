@@ -9,9 +9,9 @@ import Spec from '!!raw-loader!@site/examples/envtest/namespace_test.go';
 
 # Migrating from envtest
 
-`github.com/yyewolf/petri/controllerruntime/envtest` is a drop-in for
-controller-runtime's `envtest` package. In a kubebuilder project, change the
-import in `suite_test.go` and nothing else:
+`github.com/yyewolf/petri/controllerruntime/envtest` is a drop-in replacement
+for controller-runtime's `envtest` package. In a kubebuilder project, change
+the import in `suite_test.go` and nothing else:
 
 ```diff
 - "sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -20,16 +20,16 @@ import in `suite_test.go` and nothing else:
 
 <CodeBlock language="go" title="suite_test.go">{Suite}</CodeBlock>
 
-Then remove what petri makes unnecessary: the `setup-envtest` step in your
-Makefile and CI, `KUBEBUILDER_ASSETS`, and any cache of downloaded binaries.
+You can then remove the `setup-envtest` step from your Makefile and CI,
+`KUBEBUILDER_ASSETS`, and any cache of downloaded binaries.
 
 ## What Start does
 
-`Environment.Start` runs a dedicated control plane, installs the CRDs and the
-webhook configurations, and fills in `LocalServingHost`, `LocalServingPort`
-and `LocalServingCertDir` for your webhook server, as envtest does. `Stop`
-removes the installed webhook configurations and the certificate directory,
-and stops the plane.
+`Environment.Start` starts a dedicated control plane and installs the CRDs and
+webhook configurations. Like envtest, it fills in `LocalServingHost`,
+`LocalServingPort` and `LocalServingCertDir` for your webhook server. `Stop`
+removes the webhook configurations and the certificate directory, then stops
+the plane.
 
 Supported fields: `CRDDirectoryPaths`, `CRDs`, `ErrorIfCRDPathMissing`,
 `CRDInstallOptions.Paths`, `CRDInstallOptions.CRDs`,
@@ -39,20 +39,20 @@ Supported fields: `CRDDirectoryPaths`, `CRDs`, `ErrorIfCRDPathMissing`,
 `WebhookInstallOptions.LocalServingCertDir`, `Scheme`,
 `AttachControlPlaneOutput` and `DisableDefaultControllers`.
 
-Fields that would change what a test tests make `Start` fail instead of being
-ignored:
+Some fields would change what your tests check, so `Start` fails when they are
+set instead of ignoring them:
 
 - `UseExistingCluster`: petri never talks to a real cluster;
 - `BinaryAssetsDirectory`: petri runs no binaries;
 - `CRDInstallOptions.CleanUpAfterUse`: petri never deletes CRDs.
 
-A CRD path that is missing or holds no manifests always fails, whatever
+A CRD path that is missing or has no manifests always fails, whatever
 `ErrorIfCRDPathMissing` says.
 
 ## What changes
 
 The drop-in runs petri's default controllers, the namespace controller and the
-garbage collector, so your suite now sees what a cluster would:
+garbage collector, so your suite sees what a cluster would do:
 
 <CodeBlock language="go" title="namespace_test.go">{Spec}</CodeBlock>
 
@@ -64,12 +64,11 @@ garbage collector, so your suite now sees what a cluster would:
 | Kubernetes version | any, per binary | your `k8s.io/client-go` minor |
 | Workload controllers | none | opt-in with `testEnv.EnableControllers(t, ...)` |
 
-A test that relied on envtest's behaviour can notice. The usual case is a
-custom resource with a finalizer nobody removes: its namespace now stays
-`Terminating`, waiting for that object, as it would on a cluster. Remove the
-finalizer in the test's cleanup, or set `DisableDefaultControllers: true` for
-envtest's behaviour.
+A test that relied on envtest's behaviour may notice. The usual case is a
+custom resource with a finalizer that nothing removes: its namespace now stays
+`Terminating` until the finalizer goes, as on a cluster. Remove the finalizer
+in the test's cleanup, or set `DisableDefaultControllers: true` to get
+envtest's behaviour back.
 
-Version-skew testing, running your client against an older or newer API
-server, is not possible with petri: the API server is compiled into the test
-binary, so it always matches your client libraries.
+petri cannot test version skew, such as your client against an older API
+server; see [compatibility](../reference/compatibility.mdx#one-version-per-test-binary).

@@ -11,10 +11,10 @@ import Spec from '!!raw-loader!@site/examples/ginkgo/collection_test.go';
 
 ## Ginkgo
 
-Ginkgo's `GinkgoTB()` adapts the running spec to a `testing.TB`, so petri's
-helpers work in specs as they do in plain tests, the shared plane included.
-Cleanups petri registers, such as deleting the test's namespace, run when the
-spec ends.
+Ginkgo's `GinkgoTB()` turns the running spec into a `testing.TB`. petri's
+helpers then work in specs as they do in plain tests, including the shared
+plane. Cleanups that petri registers, such as deleting the test's namespace,
+run when the spec ends.
 
 <CodeBlock language="go" title="suite_test.go">{Suite}</CodeBlock>
 
@@ -25,8 +25,8 @@ A kubebuilder suite built on envtest needs none of this: switch to the
 
 ## Without a testing.TB
 
-For frameworks that cannot provide a `testing.TB`, most helpers have a variant
-that takes a context and returns an error:
+Most helpers have a variant for frameworks that cannot provide a
+`testing.TB`. It takes a context and returns an error:
 
 | With a `testing.TB` | Context variant |
 |---|---|
@@ -43,6 +43,6 @@ that takes a context and returns an error:
 | `cp.ExpectPods(t, ...)` | `cp.ExpectPodsCtx(ctx, ...)`, then `Verify(ctx)` |
 | `cp.StrictPods(t)` | `cp.StrictPodsCtx(ctx)`, then `cp.UnexpectedPods()` |
 
-`cp.EnableControllers` has no context variant: it needs a `testing.TB`. The
-shared plane does too; without one, start a dedicated plane with `petri.New`.
-The context variants leave cleanup to you.
+The context variants leave cleanup to you. Two things need a `testing.TB` and
+have no variant: `cp.EnableControllers` and the shared plane. Without a
+`testing.TB`, start a dedicated plane with `petri.New`.

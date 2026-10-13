@@ -5,8 +5,8 @@ description: When a test needs a control plane of its own.
 
 # Shared or dedicated
 
-Default to the shared plane, `petri.Start(t)`. A test needs a dedicated one,
-`petri.New(ctx)`, when it does one of these:
+Most tests belong on the shared plane, `petri.Start(t)`. A test needs a
+dedicated plane, `petri.New(ctx)`, when it does one of these:
 
 | The test… | Why the shared plane cannot do it |
 |---|---|
@@ -16,8 +16,6 @@ Default to the shared plane, `petri.Start(t)`. A test needs a dedicated one,
 | asserts on cluster-wide state, such as "no ClusterRole named X exists" | other tests create cluster-wide objects concurrently |
 | runs a controller that cannot be limited to one namespace | it would act on other tests' objects |
 
-A dedicated plane costs about two seconds to start and its own memory, around
-300 MiB, more with `-race`. Group the tests that need one, and share it
-between their subtests when they can.
-
-Everything else, which is most tests, belongs on the shared plane.
+A dedicated plane takes about two seconds to start and needs its own memory:
+around 300 MiB, more with `-race`. Group the tests that need one, and let their
+subtests share it when they can.

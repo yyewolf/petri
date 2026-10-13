@@ -11,23 +11,22 @@ import NotReady from '!!raw-loader!@site/examples/nodes/notready_test.go';
 
 # Nodes and scheduling
 
-A dedicated plane can have Nodes. They are simulated the way
-[kwok](https://kwok.sigs.k8s.io/) simulates them: no container ever runs, but a
-Pod placed on a Node goes `Running` and `Ready` at once, with an IP from the
-Node's PodCIDR, and a deleted Pod goes away at once. Workload controllers then
-behave as on a cluster.
+petri simulates Nodes the way [kwok](https://kwok.sigs.k8s.io/) does. No
+container runs. A Pod placed on a Node becomes `Running` and `Ready` at once,
+with an IP from the Node's PodCIDR, and a deleted Pod goes away at once. The
+workload controllers then behave as they do on a cluster.
 
-Nodes belong to the whole cluster, so only [dedicated planes](control-planes.mdx#dedicated-control-planes)
-have them: the shared plane refuses every Node operation, so that one test's
-Nodes never run another test's Pods. The samples on this page share a helper
-that starts one:
+A Node can run any test's Pods, so only
+[dedicated planes](control-planes.mdx#dedicated-control-planes) have Nodes. The
+shared plane refuses every Node operation. The samples on this page share a
+helper that starts a dedicated plane:
 
 <CodeBlock language="go" title="plane_test.go">{Plane}</CodeBlock>
 
 ## Adding Nodes
 
-`cp.AddNode(t, petri.NodeOptions{...})` creates a Ready Node and deletes it when
-the test ends. Every option is optional:
+`cp.AddNode(t, petri.NodeOptions{...})` creates a Ready Node and deletes it
+when the test ends. All options are optional:
 
 | Option | Default |
 |---|---|
@@ -37,26 +36,25 @@ the test ends. Every option is optional:
 | `Capacity` | 32 CPUs, 256Gi of memory, 1Ti of ephemeral storage, 110 Pods |
 | `Unschedulable` | `false`; `true` creates the Node cordoned |
 
-Each Node gets its own PodCIDR and InternalIP, and reports a kubelet version
-and conditions as a real kubelet would.
+Each Node gets its own PodCIDR and InternalIP. It reports a kubelet version and
+conditions, as a real kubelet would.
 
 ## kube-scheduler
 
-Enable `petri.SchedulerController` and upstream kube-scheduler, with its
-default profile, places Pods by requests, taints and tolerations, node
+Enable `petri.SchedulerController` to run upstream kube-scheduler with its
+default profile. It places Pods by requests, taints and tolerations, node
 selectors, affinities and topology spread:
 
 <CodeBlock language="go" title="scheduler_test.go">{Scheduler}</CodeBlock>
 
-Without the scheduler, Pods stay Pending until the test places them; see
-[manual placement and Pod expectations](pod-expectations.mdx). A plane uses one
-or the other: enabling the scheduler on a plane where the test placed Pods by
-hand fails the test, and the reverse too.
+Without the scheduler, Pods stay Pending until the test places them. A plane
+uses either the scheduler or manual placement; see
+[manual placement and Pod expectations](pod-expectations.mdx).
 
 ## Changing Nodes
 
-The `*petri.Node` that `AddNode` returns changes the Node the way an operator or
-a failing kubelet would:
+`AddNode` returns a `*petri.Node`. Its methods change the Node the way an
+administrator or a failing kubelet would:
 
 | Method | Effect |
 |---|---|
@@ -70,18 +68,19 @@ a failing kubelet would:
 
 ## Node failures
 
-A Node that is not Ready has a frozen kubelet: Pods bound to it stay Pending,
-and Pods deleted from it stay `Terminating`, until it is Ready again.
+A Node that is not Ready behaves as if its kubelet were frozen. Pods bound to
+it stay Pending and Pods deleted from it stay `Terminating` until it is Ready
+again.
 
 <CodeBlock language="go" title="notready_test.go">{NotReady}</CodeBlock>
 
 petri runs no node lifecycle controller, so nothing reacts to a NotReady Node
-on its own: no taint-based eviction, no `tolerationSeconds`. The test drives
-what happens next, for example with `Drain` or `Delete`.
+by itself. There is no taint-based eviction and no `tolerationSeconds`. The
+test decides what happens next, for example with `Drain` or `Delete`.
 
 ## What is not simulated
 
-No container runs, so probes, images, volumes, resource usage and restarts do
-not exist, and readiness gates are ignored. Pods stay `Running` until the test
-finishes them with `CompletePod` or `FailPod`, or deletes them. There are no
-Node heartbeats or Leases.
+No container runs, so there are no probes, images, volumes, resource usage or
+restarts, and readiness gates are ignored. A Pod stays `Running` until the
+test finishes it with `CompletePod` or `FailPod`, or deletes it. Nodes send no
+heartbeats and have no Leases.

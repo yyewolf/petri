@@ -5,10 +5,11 @@ description: Memory and build costs of a petri control plane, measured against e
 
 # Resource usage
 
-One control plane takes about 300 MiB, growing with what tests store: less
-than envtest's three processes, which take about 350 MiB together. Measured on
-Kubernetes 1.37, idle and then after 5,000 writes of 1 KiB ConfigMaps, counting
-the test process and, for envtest, its etcd and kube-apiserver:
+One control plane takes about 300 MiB, and grows with what tests store.
+envtest's three processes take about 350 MiB together. These figures were
+measured on Kubernetes 1.37, idle and then after 5,000 writes of 1 KiB
+ConfigMaps. They count the test process and, for envtest, its etcd and
+kube-apiserver:
 
 | Build | petri | envtest |
 |---|---|---|
@@ -18,19 +19,19 @@ the test process and, for envtest, its etcd and kube-apiserver:
 ## The race detector
 
 The race detector instruments everything compiled into the test binary. With
-envtest that is only your code, since kube-apiserver and etcd are separate
-binaries; with petri it is the whole API server too, and no setting changes
-that. `GOGC` barely helps: the memory is the detector's shadow state, not
-garbage.
+envtest that is only your code, because kube-apiserver and etcd are separate
+binaries. With petri it includes the whole API server, and no setting changes
+that. `GOGC` barely helps, because the memory is the detector's shadow state,
+not garbage.
 
 ## Building
 
-Linking a test binary that imports petri takes about 3 GiB of RAM, against
-about 1 GiB with envtest. The first build compiles the API server and the
-controllers and takes a few minutes; later builds use Go's build cache.
+Linking a test binary that imports petri takes about 3 GiB of RAM, compared
+with about 1 GiB with envtest. The first build compiles the API server and the
+controllers and takes a few minutes. Later builds use Go's build cache.
 
 ## Many packages
 
 `go test ./...` builds and runs packages in parallel, and each package that
-starts a control plane holds its own. On small machines and CI runners, run
+starts a control plane has its own. On small machines and CI runners, run
 `-race` suites with `-p 1` or `-p 2`; see [running in CI](../practices/ci.mdx).

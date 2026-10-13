@@ -10,10 +10,9 @@ import Manifest from '!!raw-loader!@site/examples/crds/testdata/widgets.yaml';
 
 # CRDs
 
-`cp.InstallCRDs(t, sources...)` installs CustomResourceDefinitions and returns
-once each one is `Established` and its resources are served by discovery. A
-RESTMapper or client built on the next line resolves the new kinds; there is
-no stale-discovery window to wait out.
+`cp.InstallCRDs(t, sources...)` installs CustomResourceDefinitions. It returns
+once each CRD is `Established` and discovery serves its resources, so a
+RESTMapper or client built right after it already knows the new kinds.
 
 <CodeBlock language="go" title="install_test.go">{Install}</CodeBlock>
 
@@ -21,40 +20,40 @@ no stale-discovery window to wait out.
 
 ## Sources
 
-Each source can be:
+A source can be:
 
-- a path to a file or a directory, read recursively,
-- an `fs.FS`, so manifests embedded with `//go:embed` work,
+- a path to a file, or to a directory that is read recursively;
+- an `fs.FS`, such as manifests embedded with `//go:embed`;
 - a `*apiextensionsv1.CustomResourceDefinition` object.
 
-Files are YAML or JSON, multi-document files included. Documents that are not
-CRDs are skipped, as envtest does, so you can point it at a directory of mixed
-manifests such as kubebuilder's `config/crd/bases`.
+Files can be YAML or JSON, with several documents per file. Documents that are
+not CRDs are skipped, as in envtest, so you can point it at a directory of
+mixed manifests such as kubebuilder's `config/crd/bases`.
 
 ## Installing from many tests
 
-Call `InstallCRDs` in every test that needs the CRDs, not once in `TestMain`.
-Installing is idempotent and safe from parallel tests:
+Call `InstallCRDs` in each test that needs the CRDs, not once in `TestMain`.
+Parallel tests can install the same CRDs safely:
 
 - a CRD that does not exist yet is created;
-- a CRD that exists with an equivalent spec, compared after the API server's
-  defaulting, is left alone;
-- a CRD that exists with a different spec fails the test, with a diff.
+- a CRD that exists with the same spec, after the API server's defaulting, is
+  left alone;
+- a CRD that exists with a different spec fails the test and shows the diff.
 
-CRDs are never deleted. On the shared plane, other tests may still be using
+CRDs are never deleted, because other tests on the shared plane may still use
 them.
 
 ## Waiting on custom resources
 
-Custom resources have no typed client unless you generate one. Wrap a dynamic
-client's resource with `petri.DynamicResource` to use the
-[wait helpers](waiting.mdx) on them:
+Custom resources have no typed client unless you generate one. To use the
+[wait helpers](waiting.mdx) on them, wrap a dynamic client's resource with
+`petri.DynamicResource`:
 
 <CodeBlock language="go" title="status_test.go">{Status}</CodeBlock>
 
-The namespace controller and the garbage collector handle custom resources too,
-including those of CRDs installed after the plane started: deleting a
-namespace removes them, and owner references on them cascade.
+The namespace controller and the garbage collector handle custom resources
+too, even for CRDs installed after the plane started. Deleting a namespace
+removes them, and their owner references cascade.
 
 ## Without a testing.T
 

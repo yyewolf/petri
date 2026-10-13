@@ -5,16 +5,15 @@ description: Build caching, memory and parallelism settings for petri suites in 
 
 # Running in CI
 
-A petri suite runs with `go test` alone, without service containers,
-downloaded binaries or a setup step. Three settings matter: the build cache,
-memory, and timeouts.
+A petri suite needs only `go test`: no service containers and no setup step.
+Three things need attention: the build cache, memory, and timeouts.
 
 ## Cache the build
 
 The first build of a package that imports petri compiles kube-apiserver and
-the controllers, a few minutes on a CI runner. Later builds come from Go's
-build cache. Keep that cache between runs: `actions/setup-go` does it by
-default, keyed on `go.sum`.
+the controllers. That takes a few minutes on a CI runner. Later builds come
+from Go's build cache, so keep that cache between runs. `actions/setup-go` does
+this by default, keyed on `go.sum`.
 
 ```yaml title=".github/workflows/test.yml"
 name: Test
@@ -34,30 +33,28 @@ jobs:
 
 ## Memory and -race
 
-Each package that starts a control plane holds one in memory, about 300 MiB in
-a normal build. The race detector instruments everything compiled into the test
-binary, and with petri that includes the API server, so under `-race` a plane
-takes about 1 to 1.5 GiB, and linking each test binary takes about 3 GiB. See
-[resource usage](../reference/resource-usage.mdx) for the measurements.
+Each package that starts a control plane holds one in memory: about 300 MiB,
+or 1 to 1.5 GiB under `-race`. Linking a test binary under `-race` takes about
+3 GiB. [Resource usage](../reference/resource-usage.mdx) has the measurements
+and explains why.
 
-`go test ./...` builds and runs as many packages at once as there are CPUs. On
-a small runner, that can exhaust memory. Tune it with:
+`go test ./...` builds and runs as many packages at once as there are CPUs,
+which can run a small runner out of memory. To lower the load:
 
-- `-p 2` or `-p 1`, to run fewer packages at once;
-- `-parallel N`, to run fewer tests at once within a package;
-- `-race` only where it pays: keep it on for packages with your own concurrent
-  code, and consider leaving it off for packages that only drive the API.
+- run fewer packages at once with `-p 2` or `-p 1`;
+- run fewer tests at once within a package with `-parallel N`;
+- use `-race` where it pays off. Keep it for packages with your own concurrent
+  code, and consider dropping it for packages that only call the API.
 
-A job killed without a test failure, or a `signal: killed` in the log, is
-almost always memory.
+If a job is killed without a test failure, or the log shows
+`signal: killed`, the cause is almost always memory.
 
 ## Timeouts
 
-Go's default test timeout is 10 minutes per package binary. The first run on a
-cold cache spends most of its time compiling, which does not count, but a large
-package of end-to-end tests under `-race` can come close: set `-timeout`
-explicitly, as above.
+Go's default test timeout is 10 minutes per package. Compile time does not
+count against it, but a large package of end-to-end tests under `-race` can
+still get close. Set `-timeout` explicitly, as above.
 
-petri's waits time out after 30 seconds by default. On a slow runner, prefer a
-longer timeout on the waits that need it, with `petri.WithTimeout`, over
+petri's waits time out after 30 seconds by default. On a slow runner, give the
+waits that need it a longer timeout with `petri.WithTimeout`, rather than
 retrying whole tests.

@@ -6,31 +6,33 @@ description: What petri is, and how it compares with envtest.
 
 # Introduction
 
-petri runs a real Kubernetes control plane inside `go test`: upstream
-kube-apiserver code, compiled into your test binary and serving from memory.
-There is nothing to download, no container to start and nothing written to
-disk. A test calls `petri.Start(t)` for the control plane its test binary
-shares, `cp.Namespace(t)` for a namespace of its own, and talks to the API
+petri runs a real Kubernetes control plane inside `go test`. The upstream
+kube-apiserver code is compiled into your test binary and keeps its data in
+memory, so there is nothing to download, no container to start and nothing
+written to disk.
+
+A test calls `petri.Start(t)` to get the control plane its test binary shares,
+and `cp.Namespace(t)` to get a namespace of its own. It then talks to the API
 server with the clients it already uses.
 
 ## What you get
 
-- Validation, defaulting, admission, RBAC, strategic merge patch, CRD schemas
-  and ClusterIP allocation run upstream's own code.
+- Upstream code handles validation, defaulting, admission, RBAC, strategic
+  merge patch, CRD schemas and ClusterIP allocation.
 - Deleted namespaces go away and deleting an owner deletes its dependents,
-  without any setup. Deployments, StatefulSets, Jobs and the other workload
-  controllers run when a test enables them.
-- Simulated Nodes run Pods the way [kwok](https://kwok.sigs.k8s.io/) does,
-  placed by upstream kube-scheduler or by the test, gomock-style.
-- One plane starts in about two seconds and serves every test in the binary,
-  each in its own namespace, so suites run in parallel.
-- A controller-runtime module provides a Manager helper and a drop-in for
-  envtest.
+  with no setup. Workload controllers, such as the Deployment and Job
+  controllers, run when a test enables them.
+- Simulated Nodes run Pods the way [kwok](https://kwok.sigs.k8s.io/) does.
+  Either upstream kube-scheduler places the Pods, or the test does.
+- One control plane serves every test in the binary, so tests can run in
+  parallel.
+- A separate module adds a controller-runtime Manager helper and a drop-in
+  replacement for envtest.
 
 ## Compared with envtest
 
 controller-runtime's envtest starts etcd and kube-apiserver as binaries that
-you download first. petri differs in a few ways:
+you download first. The main differences:
 
 | | envtest | petri |
 |---|---|---|
@@ -42,13 +44,13 @@ you download first. petri differs in a few ways:
 | Memory, plain build | about 350 MiB | about 300 MiB |
 | Memory, `-race` build | about 400 MiB | about 1 to 1.5 GiB |
 
-Choose envtest if you need to test against several Kubernetes versions from one
-module, or if `-race` memory is a constraint you cannot work around. Otherwise,
-petri tests more of what a cluster does with less setup, and an existing
-envtest suite moves over by changing one import; see
+Choose envtest if you test against several Kubernetes versions from one
+module, or if you cannot afford the memory petri uses under `-race`. Otherwise
+petri covers more of a cluster's behaviour with less setup. An existing envtest
+suite moves over with a one-line import change; see
 [migrating from envtest](guides/migrating-from-envtest.mdx).
 
 ## Next
 
-Start with [getting started](getting-started.mdx), then the guides for what
-your code touches.
+Read [getting started](getting-started.mdx), then the guides for the parts of
+Kubernetes your code uses.

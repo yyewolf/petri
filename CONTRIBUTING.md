@@ -20,13 +20,15 @@ make mirror # regenerate internal/kubernetes and internal/kine
 
 ## The Go workspace
 
-The repository root carries a committed `go.work` listing petri, the
-`controllerruntime` sub-module and the site's `website/examples`, so the last
-two build against the working tree instead of a published petri version. It also replaces the final pre-split
-`google.golang.org/genproto` with an empty stand-in: nothing imports its
-packages any more, but cockroachdb/errors still requires it, and the workspace
-build list does not prune it away like a plain module build does. Builds
-without the workspace are unaffected.
+The repository root has a committed `go.work` that lists petri, the
+`controllerruntime` sub-module and the site's `website/examples`. The last two
+therefore build against the working tree instead of a published petri version.
+
+The workspace also replaces the last pre-split `google.golang.org/genproto`
+with an empty stand-in. Nothing imports its packages any more, but
+cockroachdb/errors still requires it, and a workspace build does not prune it
+the way a plain module build does. Builds without the workspace are not
+affected.
 
 ## The documentation site
 
@@ -41,7 +43,7 @@ npm run build   # what CI runs: fails on broken links
 ```
 
 Code samples are tests in the `website/examples` module, one directory per
-page, and pages import them whole:
+topic. Pages import them whole:
 
 ```mdx
 import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
@@ -49,20 +51,20 @@ import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
 <CodeBlock language="go" title="drain_test.go">{Drain}</CodeBlock>
 ```
 
-They run with `make test`, so a sample that stops compiling or passing fails
-CI. The README's Go sample is the quickstart test; CI checks that the two
-match.
+They run with `make test`, so CI fails when a sample stops compiling or
+passing. The README's Go sample is the quickstart test, and CI checks that the
+two match.
 
 Docs are versioned by release line. `website/scripts/version-docs.sh 0.N`
-freezes a line's pages and samples; the Mirror workflow runs it when `main`
+freezes a line's pages and samples. The Mirror workflow runs it when `main`
 moves to a new minor (see [docs/releasing.md](docs/releasing.md#docs-for-each-release-line)).
 
 ## Branches, versions and releases
 
-`main` tracks the newest supported Kubernetes minor and `release-1.N` branches
-carry older ones. Versions are `v0.<k8s minor>.<patch>`, and releases are cut
-by merging the release PR that release-please keeps open on each branch. See
-[docs/releasing.md](docs/releasing.md) for the details.
+`main` tracks the newest supported Kubernetes minor, and `release-1.N` branches
+carry older ones. Versions are `v0.<k8s minor>.<patch>`. A release happens when
+someone merges the release PR that release-please keeps open on each branch.
+See [docs/releasing.md](docs/releasing.md) for the details.
 
 ## The mirrors
 
@@ -73,23 +75,26 @@ rewritten:
   `k8s.io/kubernetes`.
 - `internal/kine`: kine's memory driver and etcd gRPC server from
   `github.com/k3s-io/kine`. Depending on kine directly would raise every
-  user's Go floor to whatever kine's go.mod declares, which is usually a newer
-  patch than Kubernetes requires.
+  user's Go floor to the version kine's go.mod declares, usually a newer patch
+  than Kubernetes requires.
 
-Never edit either by hand; CI regenerates them and fails on any difference.
+Never edit either by hand. CI regenerates them and fails on any difference.
 Each tree's `MIRROR.json` lists the upstream packages petri needs (`roots`)
-and records the mirrored version. Add a root there, not a file.
+and records the mirrored version. To mirror more code, add a root there rather
+than a file.
 
 The only allowed differences from upstream are the patches in
-`hack/mirror/patches/<kubernetes|kine>/`: unified diffs with paths relative
-to the mirror directory, applied in name order after the import rewrite. Keep
-them small and say in the patched code why it differs. Today one patch
-replaces kine's import of etcd's server module, used for a single constant,
-which keeps etcd's server, raft and bbolt out of every user's graph. When an
-update makes a patch fail, `make mirror` stops and names it: rebase it onto
-the new upstream, or drop it if upstream made it unnecessary.
+`hack/mirror/patches/<kubernetes|kine>/`. They are unified diffs with paths
+relative to the mirror directory, applied in name order after the import
+rewrite. Keep them small, and explain in the patched code why it differs.
+Today there is one patch. It replaces kine's import of etcd's server module,
+used for a single constant, which keeps etcd's server, raft and bbolt out of
+every user's graph.
+
+When an update breaks a patch, `make mirror` stops and names it. Rebase the
+patch onto the new upstream, or drop it if upstream made it unnecessary.
 `TestBuildGraphStaysLean` fails if a module petri keeps out, such as etcd's
-server or one of kine's storage backends, is built again.
+server or one of kine's storage backends, gets built again.
 
 - `make mirror` regenerates both at the versions their `MIRROR.json` records.
 - `make mirror K8S_VERSION=v1.37.2` moves to another Kubernetes release and
@@ -100,20 +105,25 @@ server or one of kine's storage backends, is built again.
 petri's `go` directive follows Kubernetes': `make mirror` raises it when a
 Kubernetes release needs a newer Go, and never for kine.
 
-The Mirror workflow runs daily. It opens a PR for each new patch release on
-`main` and every `release-1.N` branch, for Kubernetes and for kine within its
-current minor; when both have one, they share the PR. Moving kine to a new
-minor is left to a human, since it usually follows a Kubernetes minor. When a new Kubernetes minor ships, it
-cuts `release-1.N` from `main` and opens a PR moving `main` to the new minor;
-the PR also bumps the `controllerruntime` sub-module's k8s.io and
-controller-runtime requirements when a matching controller-runtime is out, and
-opens as a draft with a note when it is not.
-Each target branch has at most one mirror PR, from `mirror/<branch>`: a newer
-release updates it in place, and runs that would push identical content do
-not push. A PR closed without merging comes back only once the release or its
-target branch changes. Updates that fail `make mirror` or the tests open
-as drafts.
-It opens PRs with the workflow token and dispatches CI on them; see
+The Mirror workflow runs daily:
+
+- It opens a PR for each new patch release, on `main` and on every
+  `release-1.N` branch. This covers Kubernetes, and kine within its current
+  minor. When both have a new patch, they share one PR.
+- When a new Kubernetes minor ships, it cuts `release-1.N` from `main` and
+  opens a PR that moves `main` to the new minor. If a matching
+  controller-runtime release is out, the PR also bumps the `controllerruntime`
+  sub-module's k8s.io and controller-runtime requirements. If not, the PR
+  opens as a draft with a note.
+- Moving kine to a new minor is left to a human, since it usually comes with a
+  Kubernetes minor.
+- Each target branch has at most one mirror PR, from `mirror/<branch>`. A newer
+  release updates it in place, and a run with nothing new pushes nothing. A PR
+  closed without merging comes back only when the release or its target
+  branch changes.
+- Updates that fail `make mirror` or the tests open as drafts.
+
+The workflow opens PRs with the workflow token and starts CI on them; see
 [docs/releasing.md](docs/releasing.md#setup) for the repository settings this
 needs.
 

@@ -14,18 +14,18 @@ import Quickstart from '!!raw-loader!@site/examples/quickstart/quickstart_test.g
 go get github.com/yyewolf/petri@v0.37
 ```
 
-petri needs Go 1.26 or newer, the same floor as Kubernetes 1.37.
+petri needs Go 1.26 or newer, the same as Kubernetes 1.37.
 
-Use the petri minor that matches your `k8s.io/client-go` minor. One test binary
-links one API server, so the server always runs the Kubernetes version your
-client libraries target:
+Pick the petri minor that matches your `k8s.io/client-go` minor. A test binary
+can link only one API server, and it is built from the same Kubernetes
+release as your client libraries:
 
 | petri     | Kubernetes | `k8s.io/client-go` |
 |-----------|------------|--------------------|
 | `v0.37.x` | 1.37       | `v0.37.x`          |
 
-If you use controller-runtime, also add the sub-module, which carries the
-matching controller-runtime release:
+If you use controller-runtime, add the sub-module too. It requires the
+controller-runtime release built for the same Kubernetes minor:
 
 ```bash
 go get github.com/yyewolf/petri/controllerruntime@v0.37
@@ -35,17 +35,17 @@ go get github.com/yyewolf/petri/controllerruntime@v0.37
 
 <CodeBlock language="go" title="quickstart_test.go">{Quickstart}</CodeBlock>
 
-- `petri.Start(t)` returns the control plane shared by every test in the test
-  binary, starting it on first use. There is nothing to set up in `TestMain`
-  and nothing to tear down.
-- `cp.Namespace(t)` gives each test its own namespace, so parallel tests do not
+- `petri.Start(t)` returns the control plane that every test in the binary
+  shares, and starts it on first use. You set nothing up in `TestMain` and
+  tear nothing down.
+- `cp.Namespace(t)` gives the test its own namespace, so parallel tests do not
   see each other's objects. The namespace is deleted when the test ends.
 - `cp.Client()` and `cp.Config()` give admin access, like envtest's config.
-- The namespace controller and the garbage collector always run. Other
-  controllers, such as the Deployment controller here, are enabled per test
-  with `EnableControllers`.
-- `petri.WaitFor` watches the object until the condition holds, and fails the
-  test if it does not within 30 seconds.
+- The namespace controller and the garbage collector always run. A test
+  enables any other controller it needs, such as the Deployment controller
+  here, with `EnableControllers`.
+- `petri.WaitFor` watches the object until the condition holds. It fails the
+  test after 30 seconds.
 
 ## Run it
 
@@ -53,8 +53,7 @@ go get github.com/yyewolf/petri/controllerruntime@v0.37
 go test ./...
 ```
 
-There are no binaries to download and no containers to start: the API server
-is compiled into the test binary. The first build compiles it and takes a few
-minutes; later runs use the build cache. The race detector instruments the
-API server too, so `-race` builds use noticeably more memory than with
-envtest; see [resource usage](reference/resource-usage.mdx).
+The first build compiles the API server and takes a few minutes. Later runs
+use Go's build cache. Builds with `-race` need much more memory than with
+envtest, because the race detector instruments the API server too; see
+[resource usage](reference/resource-usage.mdx).

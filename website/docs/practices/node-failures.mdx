@@ -9,10 +9,9 @@ import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
 
 # Simulating Node failures
 
-Code that runs on a cluster has to cope with Nodes going away: an operator
-that manages stateful workloads, a controller that reschedules work, anything
-with a PodDisruptionBudget. petri lets a test cause each failure on purpose and
-in order, on a [dedicated plane with Nodes](../guides/nodes.mdx).
+Code that manages workloads, or that sets PodDisruptionBudgets, has to cope
+with Nodes going away. On a [dedicated plane with Nodes](../guides/nodes.mdx),
+a test can cause each failure itself, in the order it chooses.
 
 ## What you can cause
 
@@ -30,7 +29,7 @@ in order, on a [dedicated plane with Nodes](../guides/nodes.mdx).
 <CodeBlock language="go" title="notready_test.go">{NotReady}</CodeBlock>
 
 To check that something does not happen, wait for it with a short timeout and
-expect the wait to fail, as the test does for the Pod that must not start.
+expect the wait to fail. The test does this for the Pod that must not start.
 
 ## Draining under a budget
 
@@ -39,7 +38,6 @@ expect the wait to fail, as the test does for the Pod that must not start.
 ## What petri leaves to you
 
 petri runs no node lifecycle controller. A NotReady Node is never tainted
-`NoExecute` and its Pods are never evicted on their own, so a test that needs
-that behaviour performs it: evict or delete the Pods, or delete the Node, at
-the point the test chooses. That keeps failure tests deterministic: nothing
-happens on a timer.
+`NoExecute`, and its Pods are never evicted by themselves. If a test needs
+that, it evicts or deletes the Pods, or deletes the Node, when it chooses.
+Because nothing happens on a timer, failure tests are deterministic.

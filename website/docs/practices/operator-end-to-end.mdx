@@ -8,29 +8,28 @@ import Operator from '!!raw-loader!@site/examples/operator/operator_test.go';
 
 # Testing an operator end to end
 
-An operator's job is rarely done when it has created an object: it is done when
-what it created works. With petri a test can follow the whole chain, from the
-custom resource a user creates to Pods running on Nodes, in one process and a
-few seconds.
+A petri test can follow an operator's whole chain, from the custom resource a
+user creates to Pods running on Nodes. It runs in one process and takes a few
+seconds.
 
 <CodeBlock language="go" title="operator_test.go">{Operator}</CodeBlock>
 
-The test assembles the cluster the operator expects, no more:
+The test sets up only what the operator expects to find in the cluster:
 
 - the operator's CRDs, with [`InstallCRDs`](../guides/crds.mdx);
-- Nodes and kube-scheduler, so Pods run;
-  see [Nodes and scheduling](../guides/nodes.mdx);
+- Nodes and kube-scheduler, so Pods run (see
+  [Nodes and scheduling](../guides/nodes.mdx));
 - the built-in controllers between the operator's output and running Pods,
-  here Deployment and ReplicaSet;
-- the operator itself, started like its `main` starts it, with
+  here the Deployment and ReplicaSet controllers;
+- the operator itself, started as its `main` starts it, with
   [the Manager helper](../guides/controller-runtime.mdx).
 
-Then it acts as a user would and waits for the outcome a user cares about.
+Then it acts as a user would, and waits for the result the user cares about.
 
 ## Choosing how far to go
 
-Not every test needs the whole chain. Pick the cheapest setup that still
-exercises the behaviour:
+Not every test needs the whole chain. Pick the cheapest setup that still covers
+the behaviour:
 
 | To test… | Use |
 |---|---|

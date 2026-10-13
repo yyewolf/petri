@@ -10,35 +10,33 @@ import Impersonation from '!!raw-loader!@site/examples/namespaces/impersonation_
 
 ## A namespace per test
 
-`cp.Namespace(t)` creates a namespace and deletes it when the test ends. Its
-name comes from the test's name plus a random suffix, so subtests and parallel
-tests never collide, and a name in a failure message tells you which test made
-the object:
+`cp.Namespace(t)` creates a namespace and deletes it when the test ends. The
+name is the test's name plus a random suffix. Subtests and parallel tests never
+collide, and a namespace in a failure message tells you which test created it:
 
 ```text
 testteama-x7k2p
 ```
 
-With the namespace controller running, which is the default, a deleted
-namespace is emptied and then removed, as on a cluster.
+The namespace controller runs by default, so a deleted namespace is emptied
+and then removed, as on a cluster.
 
-[`cp.NewNamespace(ctx)`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.NewNamespace) creates one without a test: it takes a context, returns
-an error, and leaves deletion to you. Use it from frameworks that have no
-`testing.TB` at hand; see [Ginkgo and other frameworks](frameworks.mdx).
+[`cp.NewNamespace(ctx)`](https://pkg.go.dev/github.com/yyewolf/petri#ControlPlane.NewNamespace) creates a namespace without a test. It returns an error
+instead of failing, and you delete the namespace yourself. It is meant for
+frameworks without a `testing.TB`; see
+[Ginkgo and other frameworks](frameworks.mdx).
 
 ## Clients
 
-- `cp.Config()` returns a new admin `*rest.Config` on every call, the
-  equivalent of envtest's `cfg`. Changing the copy you get never affects other
-  tests.
-- `cp.Client()` returns a shared admin `*kubernetes.Clientset`, built once per
-  plane.
+- `cp.Config()` returns a new admin `*rest.Config` on each call, like envtest's
+  `cfg`. Changes to your copy do not affect other tests.
+- `cp.Client()` returns an admin `*kubernetes.Clientset`, built once per plane
+  and shared.
 
-Admin means `system:masters`: every request is allowed. To test what a
-less privileged identity can do, impersonate it:
+Admin means `system:masters`, which may do anything. To test what a user with
+fewer rights can do, impersonate that user:
 
 <CodeBlock language="go" title="impersonation_test.go">{Impersonation}</CodeBlock>
 
-The API server runs the RBAC and Node authorizers, as a cluster does, so
-Roles, ClusterRoles and their bindings are enforced for any identity but the
-admin one.
+The API server runs the RBAC and Node authorizers, as a cluster does. Roles,
+ClusterRoles and their bindings apply to every identity except the admin one.

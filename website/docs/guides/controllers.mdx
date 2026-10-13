@@ -8,37 +8,36 @@ import Nodeless from '!!raw-loader!@site/examples/controllers/nodeless_test.go';
 
 # Built-in controllers
 
-petri runs upstream kube-controller-manager controllers, the same code a
-cluster runs, inside your test process. It does not run kube-controller-manager
-itself: a small manager starts each controller with shared informers when a
-test asks for it.
+petri runs the upstream controllers from kube-controller-manager inside your
+test process. It does not run kube-controller-manager itself. Instead, a small
+manager starts each controller, with shared informers, when a test asks for
+it.
 
 ## On by default
 
-The namespace controller and the garbage collector run on every plane, shared
-or dedicated:
+Every plane runs two controllers:
 
-- a deleted namespace is emptied and removed;
-- deleting an owner deletes its dependents, with background, foreground and
-  orphan propagation, for built-in kinds and custom resources alike.
+- the namespace controller, which empties and removes a deleted namespace;
+- the garbage collector, which deletes dependents when their owner is deleted,
+  with background, foreground and orphan propagation, for built-in kinds and
+  custom resources.
 
-`Start` and `New` return once their informers are synced, so the first object
-a test creates is seen by both. This is the main behavioural difference from
-envtest; a dedicated plane started with `petri.WithoutDefaultControllers()`
-runs without them.
+`Start` and `New` return once both have synced, so they see the first object a
+test creates. This is the main difference from envtest. A dedicated plane
+started with `petri.WithoutDefaultControllers()` runs neither.
 
 ## Enabling the others
 
 `cp.EnableControllers(t, controllers...)` starts controllers and returns once
-their informers are synced, so an object created on the next line is seen.
+they have synced, so they see an object created on the next line.
 
 <CodeBlock language="go" title="nodeless_test.go">{Nodeless}</CodeBlock>
 
-- Enabling is idempotent and safe from parallel tests. On the shared plane, a
-  controller stays enabled for every later test once one test enabled it.
-- Enabling a controller never enables another. The Deployment controller alone
-  creates ReplicaSets but no Pods.
-- `petri.WorkloadControllers()` returns all the workload controllers at once.
+- Parallel tests can enable the same controller safely. On the shared plane, a
+  controller stays on for every later test once one test enables it.
+- Enabling a controller never enables another. The Deployment controller on its
+  own creates ReplicaSets but no Pods.
+- `petri.WorkloadControllers()` returns all the workload controllers.
 
 | Controller | What it does |
 |---|---|
@@ -58,9 +57,9 @@ their informers are synced, so an object created on the next line is seen.
 
 ## Without Nodes
 
-The shared plane has no Nodes, and neither does a dedicated plane until a test
-adds some. Pods then stay `Pending`, and each workload controller stops where
-it would need a running Pod:
+The shared plane has no Nodes, and a dedicated plane has none until a test
+adds them. Without Nodes, Pods stay `Pending`, and each workload controller
+stops at the point where it needs a running Pod:
 
 | Controller | On a plane without Nodes |
 |---|---|
@@ -71,14 +70,13 @@ it would need a running Pod:
 | EndpointSlice | Creates EndpointSlices with no endpoints: no Pod is ever Ready. |
 | Disruption | Every budget settles on zero `disruptionsAllowed`. |
 
-That is often all a test needs: an operator that creates Deployments can be
-tested on what it created, without anything running. When a test needs the
-whole chain, add [Nodes](nodes.mdx) on a dedicated plane, and Deployments
-become Available, StatefulSets roll out and Jobs complete when the test
-completes their Pods.
+Many tests need no more than this. If your operator creates Deployments, you
+can check what it created without running anything. To test further, add
+[Nodes](nodes.mdx) on a dedicated plane. Deployments then become Available and
+StatefulSets roll out, and Jobs complete when the test completes their Pods.
 
 ## CronJobs
 
-The CronJob controller schedules by the wall clock, and upstream gives no way
-to inject a clock. To test what a CronJob runs, create a Job from its
+The CronJob controller follows the wall clock, and upstream has no way to
+inject a fake one. To test what a CronJob runs, create a Job from its
 `spec.jobTemplate` in the test instead of waiting for the schedule.

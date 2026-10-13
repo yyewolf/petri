@@ -1,6 +1,6 @@
 <h1 align="center">petri</h1>
 
-<p align="center">A real Kubernetes control plane inside <code>go test</code>: upstream kube-apiserver and controllers, compiled into your test binary. No binaries to download, no Docker.</p>
+<p align="center">A real Kubernetes control plane inside <code>go test</code>. The upstream kube-apiserver and controllers are compiled into your test binary, so there is nothing to download and no Docker.</p>
 
 <p align="center">
   <a href="https://yyewolf.github.io/petri/"><img src="https://img.shields.io/badge/docs-yyewolf.github.io%2Fpetri-b45309" alt="Documentation"></a>
@@ -25,9 +25,8 @@ go get github.com/yyewolf/petri/controllerruntime@v0.37
 ```
 
 > [!IMPORTANT]
-> Use the petri minor that matches your `k8s.io/client-go` minor: petri
-> `v0.37.x` embeds Kubernetes 1.37. The API server is compiled into your test
-> binary, so it always runs the version your client libraries target.
+> Use the petri minor that matches your `k8s.io/client-go` minor. petri
+> `v0.37.x` embeds Kubernetes 1.37, so it pairs with `k8s.io/client-go v0.37.x`.
 
 ## Usage
 
@@ -66,19 +65,19 @@ func TestDeploymentIsReconciled(t *testing.T) {
 }
 ```
 
-`petri.Start(t)` starts one control plane for the whole test binary, in about
-two seconds; each test works in its own namespace. From there:
+`petri.Start(t)` starts one control plane for the whole test binary in about
+two seconds, and each test works in its own namespace. petri also covers:
 
-- [CRDs](https://yyewolf.github.io/petri/docs/guides/crds/) and [webhooks](https://yyewolf.github.io/petri/docs/guides/webhooks/), installed per test.
-- [Built-in controllers](https://yyewolf.github.io/petri/docs/guides/controllers/): namespace deletion and garbage collection by default, workload controllers on demand.
-- [Simulated Nodes and kube-scheduler](https://yyewolf.github.io/petri/docs/guides/nodes/), or [Pods placed by the test](https://yyewolf.github.io/petri/docs/guides/pod-expectations/), gomock-style.
-- [controller-runtime](https://yyewolf.github.io/petri/docs/guides/controller-runtime/) and an [envtest drop-in](https://yyewolf.github.io/petri/docs/guides/migrating-from-envtest/): change one import.
+- [CRDs](https://yyewolf.github.io/petri/docs/guides/crds/) and [webhooks](https://yyewolf.github.io/petri/docs/guides/webhooks/), installed by the test that needs them.
+- [Built-in controllers](https://yyewolf.github.io/petri/docs/guides/controllers/). Namespace deletion and garbage collection always run; workload controllers run when a test enables them.
+- [Simulated Nodes with kube-scheduler](https://yyewolf.github.io/petri/docs/guides/nodes/), or [Pods placed by the test](https://yyewolf.github.io/petri/docs/guides/pod-expectations/) in the style of gomock.
+- [controller-runtime](https://yyewolf.github.io/petri/docs/guides/controller-runtime/), and a [drop-in for envtest](https://yyewolf.github.io/petri/docs/guides/migrating-from-envtest/) that takes a one-line import change.
 
 ## Documentation
 
-- [yyewolf.github.io/petri](https://yyewolf.github.io/petri/): guides, practices and reference.
-- [pkg.go.dev](https://pkg.go.dev/github.com/yyewolf/petri): the API.
-- [CONTRIBUTING.md](CONTRIBUTING.md): working on petri.
+- [yyewolf.github.io/petri](https://yyewolf.github.io/petri/) has the guides and reference.
+- [pkg.go.dev](https://pkg.go.dev/github.com/yyewolf/petri) has the API.
+- [CONTRIBUTING.md](CONTRIBUTING.md) explains how to work on petri.
 
 ## License
 

@@ -8,54 +8,52 @@ import Table from '!!raw-loader!@site/examples/parallel/table_test.go';
 
 # Fast parallel suites
 
-A petri suite is fast when its tests run in parallel against the shared control
-plane. One plane starts in about two seconds per test binary; after that, a
-test costs what its API calls cost.
+A petri suite is fast when its tests run in parallel on the shared control
+plane. The plane starts once per test binary. After that, a test costs only
+its API calls.
 
 ## The rules
 
-1. **Use the shared plane.** Call `petri.Start(t)` in every test. Start a
-   dedicated plane only for what the shared one cannot do; see
+1. Use the shared plane: call `petri.Start(t)` in every test. Start a dedicated
+   plane only for what the shared one cannot do; see
    [shared or dedicated](shared-or-dedicated.mdx).
-2. **Call `t.Parallel()` first**, in every test and subtest.
-3. **Give each test and subtest its own namespace** with `cp.Namespace(t)`,
-   and keep objects inside it.
-4. **Give each subtest its own deadline.**
-5. **Wait, never sleep.** Use [`WaitFor` and `Retry`](../guides/waiting.mdx).
-6. **Install what you need in the test that needs it.** CRDs, controllers and
-   webhooks are safe to install from many tests; do not rely on `TestMain` or on
-   another test having run first.
+2. Call `t.Parallel()` first, in every test and subtest.
+3. Give each test and subtest its own namespace with `cp.Namespace(t)`, and
+   keep its objects inside it.
+4. Give each subtest its own deadline (see below).
+5. Wait with [`WaitFor` and `Retry`](../guides/waiting.mdx), never with sleeps.
+6. Install CRDs, controllers and webhooks in each test that needs them.
+   Several tests can install the same ones safely. Do not rely on `TestMain`,
+   or on another test having run first.
 
 <CodeBlock language="go" title="table_test.go">{Table}</CodeBlock>
 
 ## Deadlines and parallel subtests
 
-A parallel subtest does not start when `t.Run` is called. It waits until its
-parent's function returns, then for a free slot among `-parallel` (by default,
-the number of CPUs). In a busy package that wait can be long. A deadline the
-parent created before the loop keeps running during the wait, so a subtest can
-start with its context already expired, and fail at once with
-`context deadline exceeded` on its first call, though nothing was slow.
+A parallel subtest does not start when `t.Run` is called. It first waits for
+its parent's function to return, then for a free `-parallel` slot (by default,
+one per CPU). In a busy package that can take a while. A deadline the parent
+set before the loop keeps counting during the wait. The subtest can then start
+with its context already expired, and fail at once with
+`context deadline exceeded` even though nothing was slow.
 
-Derive deadlines from the subtest's own `t.Context()`, inside the subtest, as
-the example does. petri's helpers that take a `t` already use the right
-context.
+Create deadlines inside the subtest, from its own `t.Context()`, as the example
+does. petri's helpers that take a `t` already do this.
 
 ## Cluster-wide state
 
-On the shared plane, anything that is not namespaced is shared by every test in
-the binary: CRDs, ClusterRoles, webhooks without a namespace scope, enabled
-controllers. Keep tests from depending on it being absent:
+On the shared plane, everything that is not namespaced is shared by every test
+in the binary: CRDs, ClusterRoles, enabled controllers, and webhooks not
+limited to a namespace. Write tests that work whatever other tests have
+created:
 
 - name cluster-scoped objects after the test, or use `GenerateName`;
-- scope webhooks to the test's namespace with
+- limit webhooks to the test's namespace with
   `AdmissionWebhookOptions.Namespace`;
-- write assertions about your own objects, never about counts across the
-  cluster.
+- assert on your own objects, never on counts across the cluster.
 
 ## Packages
 
 Each package is its own test binary with its own shared plane, and
 `go test ./...` runs packages in parallel. Many small packages that each start
-a plane cost more memory than a few larger ones; see
-[running in CI](ci.mdx).
+a plane use more memory than a few larger ones; see [running in CI](ci.mdx).

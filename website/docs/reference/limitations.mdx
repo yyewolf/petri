@@ -5,32 +5,48 @@ description: What petri does not do.
 
 # Limitations
 
-- **One Kubernetes version per test binary**, the one your `k8s.io/client-go`
-  targets. Version-skew testing is out of scope; see
-  [compatibility](compatibility.mdx).
-- **Pods only run on the simulated Nodes of a dedicated plane.** On the shared
-  plane, or on a plane without Nodes, Pods stay `Pending` and the workload
-  controllers stop where a running Pod is needed; see
-  [built-in controllers](../guides/controllers.mdx#without-nodes). A namespace
-  that held Pods can stay `Terminating` there, because no kubelet confirms their
-  deletion, as upstream.
-- **Simulated Nodes run no containers.** Probes, images, volumes, resource
-  usage and restarts are not simulated, readiness gates are ignored, and Pods
-  stay `Running` until the test finishes them. There are no Node heartbeats or
-  Leases, and no taint-based eviction.
-- **Not every controller is available.** Node lifecycle and IPAM, volumes
-  (PersistentVolume binding, attach and detach, expansion), the horizontal Pod
-  autoscaler, cloud controllers, certificate signing and bootstrap tokens are
-  out of scope.
-- **CronJobs follow the wall clock**, and upstream injects no clock. Tests that
-  need the Job a CronJob would create make it from the CronJob's
-  `spec.jobTemplate`.
-- **Logging is redirected process-wide.** kube-apiserver and kine log through
-  klog and logrus, which petri captures; if your code logs through them, its
-  output is captured too. `PETRI_VERBOSE=1` prints it.
-- **Storage is kine's in-memory driver**, not etcd. It behaves like etcd for
-  everything kube-apiserver does, but etcd-specific edge cases such as
-  compaction timing may differ.
-- **Frameworks without a `testing.TB` cannot use the shared plane or
-  `EnableControllers`.** Ginkgo can, through `GinkgoTB()`; see
-  [Ginkgo and other frameworks](../guides/frameworks.mdx).
+## One Kubernetes version per test binary
+
+The API server runs the version your `k8s.io/client-go` targets. petri cannot
+test version skew; see [compatibility](compatibility.mdx).
+
+## Pods run only on a dedicated plane's Nodes
+
+On the shared plane, or on any plane without Nodes, Pods stay `Pending`, and
+the workload controllers stop where they need a running Pod; see
+[built-in controllers](../guides/controllers.mdx#without-nodes). A namespace
+that held Pods can then stay `Terminating`, because no kubelet confirms that
+the Pods are gone. Upstream behaves the same way.
+
+## Simulated Nodes run no containers
+
+There are no probes, images, volumes, resource usage or restarts, and
+readiness gates are ignored. Pods stay `Running` until the test finishes them.
+Nodes send no heartbeats and have no Leases, and there is no taint-based
+eviction.
+
+## Some controllers are not available
+
+Out of scope: node lifecycle and IPAM, volumes (PersistentVolume binding,
+attach and detach, expansion), the horizontal Pod autoscaler, cloud
+controllers, certificate signing and bootstrap tokens.
+
+## CronJobs follow the wall clock
+
+Upstream has no way to inject a clock. To test the Job a CronJob would create,
+create it from the CronJob's `spec.jobTemplate`.
+
+## Logging is redirected for the whole process
+
+petri captures klog and logrus output, so it also captures your code's output
+if your code logs through them. `PETRI_VERBOSE=1` prints it.
+
+## Storage is kine, not etcd
+
+kine's in-memory driver behaves like etcd for everything kube-apiserver does.
+etcd-specific edge cases, such as compaction timing, may differ.
+
+## The shared plane and EnableControllers need a testing.TB
+
+Frameworks without a `testing.TB` cannot use them. Ginkgo can, through
+`GinkgoTB()`; see [Ginkgo and other frameworks](../guides/frameworks.mdx).

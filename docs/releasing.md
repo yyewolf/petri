@@ -1,38 +1,40 @@
 # Releasing petri
 
-Releases are automated. A human merges a release PR; everything else is done
-by the [Release workflow](../.github/workflows/release.yml), which runs
-[release-please](https://github.com/googleapis/release-please) and then tags
-the `controllerruntime` sub-module.
+Releases are automated. A human merges a release PR, and the
+[Release workflow](../.github/workflows/release.yml) does the rest: it runs
+[release-please](https://github.com/googleapis/release-please), then tags the
+`controllerruntime` sub-module.
 
 ## Versions
 
-petri versions follow the `k8s.io` staging modules (`k8s.io/client-go` and
-the rest):
+petri versions follow the `k8s.io` staging modules, such as
+`k8s.io/client-go`:
 
-- `v0.<k8s minor>.<patch>`: petri `v0.37.x` embeds Kubernetes 1.37 and is used
-  with `k8s.io/client-go v0.37.x`. The first release is `v0.37.0`.
-- The patch number goes up for every petri release, whatever the change. A
-  breaking change is a patch too, as in the staging modules.
-- There is no `v1`, and never a `v0.N` that does not match a Kubernetes minor.
+- Versions are `v0.<k8s minor>.<patch>`. petri `v0.37.x` embeds Kubernetes
+  1.37 and goes with `k8s.io/client-go v0.37.x`. The first release is
+  `v0.37.0`.
+- Only the minor matches Kubernetes. The patch number goes up with every petri
+  release, whatever the change. A breaking change is a patch too, as in the
+  staging modules.
+- There is no `v1`, and every `v0.N` matches a Kubernetes minor.
   `KubernetesVersion` in [version.go](../version.go) names the minor of the
-  release line; the workflows refuse any tag that disagrees with it.
-- The `controllerruntime` sub-module is tagged `controllerruntime/v0.N.P`
-  with every `v0.N.P`, and that tag's go.mod requires petri `v0.N.P`.
+  release line, and the workflows refuse any tag that disagrees with it.
+- Each `v0.N.P` also gets a `controllerruntime/v0.N.P` tag for the
+  sub-module, whose go.mod requires petri `v0.N.P`.
 
 ## Branches
 
 - `main` tracks the newest supported Kubernetes minor.
-- `release-1.N` branches carry older minors. The Mirror workflow cuts
-  `release-1.N` from `main` when it moves `main` to the next minor, and keeps
-  every line on its newest Kubernetes patch.
+- `release-1.N` branches carry older minors. When the Mirror workflow moves
+  `main` to the next minor, it cuts `release-1.N` from `main`. It keeps every
+  line on its newest Kubernetes patch.
 - Each of these branches has its own release PR and its own tags.
 
 ## How a release happens
 
 1. **Commits land.** Every commit on `main` and `release-1.N` follows
    [Conventional Commits](https://www.conventionalcommits.org/). The type
-   decides where it goes in the changelog:
+   decides where the commit goes in the changelog:
 
    | Type | Changelog section | Triggers a release |
    |---|---|---|
@@ -45,42 +47,45 @@ the rest):
    | `test`, `ci`, `chore` | hidden | no |
 
    Mirror updates are `build:` commits, so a Kubernetes or kine patch release
-   shows up in the next petri release on its own.
+   appears in the next petri release by itself. Commits that only touch
+   `website/` never trigger a release.
 
 2. **release-please keeps a release PR open.** After each push, it opens or
-   updates the PR `chore(<branch>): release 0.37.N` from `release-please--branches--<branch>`,
-   with the `CHANGELOG.md` section for the commits since the last release.
-   Edit the PR to reword the changelog if needed. CI checks that the PR's
-   version belongs to the release line in `version.go`.
+   updates the PR `chore(<branch>): release 0.37.N`, from the branch
+   `release-please--branches--<branch>`. The PR adds the `CHANGELOG.md` section
+   for the commits since the last release. You can edit the PR to reword the
+   changelog. CI checks that the PR's version belongs to the release line in
+   `version.go`.
 
 3. **Merge the release PR.** The Release workflow then:
-   1. tags `v0.37.N` on the merge commit and publishes its GitHub release with
+   1. tags `v0.37.N` on the merge commit and publishes its GitHub release, with
       the changelog section as notes;
    2. points `controllerruntime/go.mod` at the new tag (`go mod edit` and
-      `go mod tidy` without the workspace), builds and vets the sub-module
-      as users will get it;
+      `go mod tidy` without the workspace), then builds and vets the
+      sub-module as users will get it;
    3. commits that as `chore: release controllerruntime/v0.37.N`, tags it
       `controllerruntime/v0.37.N`, pushes both, and publishes its release.
 
-   Releases from a `release-1.N` branch are never marked as the latest
-   GitHub release.
+   Releases from a `release-1.N` branch are never marked as the latest GitHub
+   release.
 
 The sub-module needs its own commit because a go.mod cannot require a tag that
-does not exist yet: even inside the workspace, the go command reads the
-required version's go.mod. So `controllerruntime/go.mod` keeps requiring the
-previous petri release between releases, and the workspace (`go.work`) builds
-it against the working tree.
+does not exist yet. Even inside the workspace, the go command reads the
+required version's go.mod. Between releases, `controllerruntime/go.mod` keeps
+requiring the previous petri release, and the workspace (`go.work`) builds it
+against the working tree.
 
 ## A new Kubernetes minor
 
 When the Mirror workflow moves `main` to Kubernetes 1.38, update the install
-commands (`@v0.38`) and the version table in the README and `website/docs` in
-that PR; `.github/scripts/check-doc-versions.sh` fails CI until the install
-commands match. The commit also carries a
-`Release-As: 0.38.0` footer, so the next release PR proposes `v0.38.0` instead
-of the next 1.37 patch. If that footer gets lost, for example because the
-merge rewrote the message, the release PR's CI check fails. Fix it with an
-empty commit:
+commands (`@v0.38`) and the version tables in the README and `website/docs` in
+that PR. `.github/scripts/check-doc-versions.sh` fails CI until the install
+commands match.
+
+The commit also carries a `Release-As: 0.38.0` footer, so the next release PR
+proposes `v0.38.0` instead of the next 1.37 patch. If the footer gets lost, for
+example because the merge rewrote the message, the release PR's CI check
+fails. Fix it with an empty commit:
 
 ```sh
 git commit --allow-empty -m "chore: release 0.38.0" -m "Release-As: 0.38.0"
@@ -89,35 +94,34 @@ git commit --allow-empty -m "chore: release 0.38.0" -m "Release-As: 0.38.0"
 ## Docs for each release line
 
 The documentation site (`website/`) is versioned by release line, like the
-code. `main`'s docs are the current version, labelled from `version.go`. When
-the Mirror workflow moves `main` to a new minor, the same PR runs
-`website/scripts/version-docs.sh 0.N` for the outgoing line: Docusaurus freezes
-the pages under `website/versioned_docs/version-0.N/`, and the samples they show
-are copied to `website/_versioned_examples/version-0.N/` so those pages keep
-the code of their own line. If the freeze fails, the PR opens as a draft that
-says so; run the script by hand from `website/` and push the result to the PR.
+code. The docs on `main` are the current version, labelled from `version.go`.
+When the Mirror workflow moves `main` to a new minor, the same PR runs
+`website/scripts/version-docs.sh 0.N` for the outgoing line. Docusaurus freezes
+its pages under `website/versioned_docs/version-0.N/`, and the samples they
+show are copied to `website/_versioned_examples/version-0.N/`, so those pages
+keep their own line's code. If the freeze fails, the PR opens as a draft that
+says so. Run the script by hand from `website/` and push the result to the PR.
 
-Only `main` deploys the site. Fix an older line's docs in its
+Only `main` deploys the site. To fix an older line's docs, edit its
 `versioned_docs/version-0.N/` folder on `main`.
 
 ## Setup
 
 There is no secret to manage: the workflows use their own `GITHUB_TOKEN`. The
 repository needs one setting, under *Settings → Actions → General → Workflow
-permissions*: **Allow GitHub Actions to create and approve pull requests**, so
-release-please and the Mirror workflow can open their PRs. Each workflow
-declares the permissions it needs, so the default token permission can stay
-read-only.
+permissions*: **Allow GitHub Actions to create and approve pull requests**.
+Without it, release-please and the Mirror workflow cannot open their PRs. Each
+workflow declares the permissions it needs, so the default token permission
+can stay read-only.
 
 GitHub starts no workflow for pushes and PRs made with that token, so the bot
-PRs would get no CI. The Release and Mirror workflows therefore dispatch CI
-(`gh workflow run ci.yml --ref <branch>`) on the branch they pushed; its
-checks attach to the head commit and show on the PR. To re-run CI on a bot PR
-by hand, do the same from the Actions tab or with `gh`.
+PRs would get no CI. The Release and Mirror workflows therefore start CI
+themselves (`gh workflow run ci.yml --ref <branch>`) on the branch they pushed.
+Its checks attach to the head commit and show on the PR. To re-run CI on a bot
+PR by hand, run the same command, or start CI from the Actions tab.
 
-While the repository is private, the Release workflow fetches petri from git
-rather than the module proxy (`GOPRIVATE`). Nothing needs to change when it
-goes public.
+If the repository is private, the Release workflow fetches petri from git
+instead of the module proxy (`GOPRIVATE`).
 
 ## When something goes wrong
 
@@ -135,12 +139,12 @@ goes public.
   gh release create controllerruntime/v0.37.N --verify-tag --latest=false --notes "…"
   ```
 
-  The push fails if the branch moved after the release merged; re-running the
+  The push fails if the branch moved after the release merged. Re-running the
   job picks up the new head.
-- **A wrong version was tagged.** Go modules are immutable once the proxy has
-  seen them: do not move or delete a published tag. Release the next patch
-  with the fix, and retract the bad version in go.mod (`retract v0.37.N`) if
-  it must not be used.
-- **Never push release tags by hand** outside the recovery above.
+- **A wrong version was tagged.** Once the module proxy has seen a version, it
+  cannot change, so do not move or delete a published tag. Release the next
+  patch with the fix, and retract the bad version in go.mod
+  (`retract v0.37.N`) if it must not be used.
+- **Never push release tags by hand,** except for the recovery above.
   release-please finds the previous release through its own tags and
   changelog, and a stray tag confuses it.

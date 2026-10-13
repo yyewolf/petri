@@ -7,25 +7,24 @@ description: Find out why a petri test failed.
 
 ## A wait timed out
 
-A wait that times out reports the last state it saw of the object:
+A wait that times out reports the last state it saw:
 
 ```text
 petri: wait for "web": timed out; last observed state: ...
 ```
 
-Read that state before anything else. The usual causes:
+Start by reading that state. Common causes:
 
-- **A controller is not enabled.** Enabling one never enables another: a
-  Deployment needs `DeploymentController` and `ReplicaSetController` to get
-  Pods.
-- **There are no Nodes.** On the shared plane, and on a dedicated plane without
-  `AddNode`, Pods stay Pending; see
+- A controller is not enabled. Enabling one never enables another: a Deployment
+  only gets Pods with both `DeploymentController` and `ReplicaSetController`.
+- There are no Nodes, so Pods stay Pending. This is the case on the shared
+  plane, and on a dedicated plane until the test calls `AddNode`; see
   [built-in controllers](../guides/controllers.mdx#without-nodes).
-- **Nothing places the Pods.** With Nodes but without `SchedulerController`,
-  Pods wait for the test to bind them; see
+- Nothing places the Pods. With Nodes but without `SchedulerController`, Pods
+  wait for the test to bind them; see
   [manual placement](../guides/pod-expectations.mdx).
-- **The condition never looks at the right thing**, for example a status field
-  that only a controller you did not enable would set.
+- The condition checks something that never changes, such as a status field
+  set only by a controller the test did not enable.
 
 ## Startup failed
 
@@ -38,31 +37,34 @@ petri: start control plane: ...
 ...
 ```
 
-On the shared plane, every test in the binary reports the same failure; fix the
-first one.
+On the shared plane, every test in the binary reports the same failure. The
+first one is enough to read.
 
 ## Seeing the control plane's logs
 
-kube-apiserver and kine log through klog and logrus, which petri captures. Set
-`PETRI_VERBOSE=1` to also print them to stderr while the tests run:
+kube-apiserver and kine log through klog and logrus. petri redirects both, for
+the whole process, into a buffer, so if your own code logs through klog or
+logrus, its output is captured too. Set `PETRI_VERBOSE=1` to also print the
+logs to stderr while the tests run:
 
 ```bash
 PETRI_VERBOSE=1 go test -run TestReconcile -v ./controllers/
 ```
 
-They are verbose; run one test at a time.
+The logs are long, so run one test at a time.
 
 ## Looking at the cluster
 
-A test can print whatever it can read: list the objects in its namespace and
-log them with `t.Log` before failing. Events are often the fastest
-explanation: controllers and the scheduler record why they did not act, and
+A test can print anything it can read. Before failing, list the objects in its
+namespace and log them with `t.Log`. Events often explain the most quickly,
+because controllers and the scheduler record why they did not act.
 `cp.Client().CoreV1().Events(ns).List(...)` returns them.
 
 ## A test passes alone but fails in the suite
 
-Usually shared state on the shared plane: a cluster-scoped object another test
-also creates, an unscoped webhook, or an assertion that counts objects across
-namespaces. See [fast parallel suites](parallel-suites.mdx#cluster-wide-state).
-If the failure is `context deadline exceeded` at the start of a subtest, see
+The cause is usually state shared on the shared plane: a cluster-scoped object
+another test also creates, a webhook not limited to a namespace, or an
+assertion that counts objects across namespaces. See
+[fast parallel suites](parallel-suites.mdx#cluster-wide-state). If the failure
+is `context deadline exceeded` at the start of a subtest, see
 [deadlines and parallel subtests](parallel-suites.mdx#deadlines-and-parallel-subtests).

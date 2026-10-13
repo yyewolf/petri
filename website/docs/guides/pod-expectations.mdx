@@ -10,25 +10,24 @@ import Job from '!!raw-loader!@site/examples/placement/job_test.go';
 
 # Manual placement and Pod expectations
 
-Without kube-scheduler, a Pod stays Pending until the test places it. That
-turns placement into an assertion point, the way a mock turns a call into
-one: the test states which Pods it expects your code to create, and decides
-where each one runs.
+Without kube-scheduler, a Pod stays Pending until the test places it. The test
+can use that moment as an assertion, the way a mock checks a call: it states
+which Pods your code should create, and decides where each one runs.
 
 The samples run on a [dedicated plane with Nodes](nodes.mdx).
 
 ## One Pod at a time
 
-`cp.ExpectPod(t, matchers...)` waits for a Pending, unscheduled Pod that
-matches, and hands it over once: the same Pod is never returned twice.
-`cp.Bind(t, pod, node)` places it with the `pods/binding` call kube-scheduler
-makes.
+`cp.ExpectPod(t, matchers...)` waits for a matching Pod that is Pending and
+unscheduled, and returns it. It never returns the same Pod twice.
+`cp.Bind(t, pod, node)` places the Pod with the same `pods/binding` call
+kube-scheduler makes.
 
 <CodeBlock language="go" title="bind_test.go">{Bind}</CodeBlock>
 
 ## Declaring expectations
 
-`cp.ExpectPods(t, matchers...)` registers an expectation that claims matching
+`cp.ExpectPods(t, matchers...)` registers an expectation. It claims matching
 Pods as they are created, before anything else sees them:
 
 <CodeBlock language="go" title="expectations_test.go">{Expectations}</CodeBlock>
@@ -42,13 +41,13 @@ Pods as they are created, before anything else sees them:
 | `Wait(t)` | Wait until the expected number of Pods were claimed and acted on. |
 | `Pods()` | The Pods claimed so far. |
 
-When the test ends, every expectation is checked: one that claimed fewer Pods
-than it expected fails the test. An expectation never claims more than its
-count, so to catch extra Pods, call `cp.StrictPods(t)`: it fails the test for
-every Pod no expectation claimed.
+When the test ends, petri checks every expectation. One that claimed fewer
+Pods than expected fails the test. An expectation never claims more than its
+count, so extra Pods go unnoticed unless you call `cp.StrictPods(t)`, which
+fails the test for each Pod no expectation claimed.
 
 Expectations claim Pods in the order they were registered, and before
-`ExpectPod`, so a Pod goes to the first expectation that matches it.
+`ExpectPod` does. A Pod goes to the first expectation that matches it.
 
 ## Matchers
 
@@ -59,20 +58,20 @@ Expectations claim Pods in the order they were registered, and before
 | `petri.OwnedBy(obj)` | owned by an object, by UID |
 | `petri.PodMatching(description, func(*corev1.Pod) bool)` | for anything else; the description shows in failure messages |
 
-Several matchers must all match.
+A Pod must match every matcher given.
 
 ## Finishing Pods
 
-No container runs, so the test decides how a Pod ends. That is how Jobs
-complete:
+No container runs, so the test decides how a Pod ends. This is how a Job
+completes:
 
 <CodeBlock language="go" title="job_test.go">{Job}</CodeBlock>
 
-- `cp.CompletePod(t, pod)` marks it `Succeeded`, its containers terminated with
-  exit code 0.
+- `cp.CompletePod(t, pod)` marks the Pod `Succeeded`, with its containers
+  terminated with exit code 0.
 - `cp.FailPod(t, pod, exitCode)` marks it `Failed`.
-- `cp.SetPodReady(t, pod, ready)` flips its readiness, for testing how your
-  code reacts to a Pod going unready.
+- `cp.SetPodReady(t, pod, ready)` changes its readiness, to test how your code
+  handles a Pod that stops being ready.
 - `cp.Evict(t, pod)` evicts it through the Eviction API, so
   PodDisruptionBudgets apply.
 
@@ -80,7 +79,7 @@ The simulated kubelet never overrides what the test set.
 
 ## Scheduler or by hand
 
-A plane places Pods one way. `Bind`, `ExpectPod` and `ExpectPods` fail the test
-on a plane running `SchedulerController`, and enabling the scheduler on a plane
-with expectations fails too. The shared plane refuses all of them, as it has no
-Nodes.
+A plane places Pods in one way only. `Bind`, `ExpectPod` and `ExpectPods` fail
+the test on a plane running `SchedulerController`. Enabling the scheduler on a
+plane where the test placed Pods or registered expectations fails too. The
+shared plane has no Nodes, so it refuses all of these.

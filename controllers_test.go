@@ -225,10 +225,10 @@ func TestNamespaceDeletionRemovesPostStartupCustomResources(t *testing.T) {
 func TestGarbageCollectorPropagatesForBuiltInKinds(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	startCtx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 
-	cp, err := petri.New(ctx)
+	cp, err := petri.New(startCtx)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -246,9 +246,21 @@ func TestGarbageCollectorPropagatesForBuiltInKinds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			runBuiltInPropagation(ctx, t, cp, tt.policy, tt.block)
+			runBuiltInPropagation(subtestContext(t), t, cp, tt.policy, tt.block)
 		})
 	}
+}
+
+// subtestContext bounds a parallel subtest by its own clock. A parallel
+// subtest waits for its parent to return and then for a free -parallel slot,
+// so a deadline the parent set may be spent before the subtest starts.
+func subtestContext(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	t.Cleanup(cancel)
+
+	return ctx
 }
 
 // runBuiltInPropagation drives one propagation policy with a ConfigMap owner
@@ -311,10 +323,10 @@ type customCase struct {
 func TestGarbageCollectorPropagatesForCustomResources(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	startCtx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	t.Cleanup(cancel)
 
-	cp, err := petri.New(ctx)
+	cp, err := petri.New(startCtx)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -332,7 +344,7 @@ func TestGarbageCollectorPropagatesForCustomResources(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			runCustomPropagation(ctx, t, cp, tt)
+			runCustomPropagation(subtestContext(t), t, cp, tt)
 		})
 	}
 }

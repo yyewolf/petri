@@ -9,3 +9,15 @@ updates:
     # Conventional commit type for release-please: action bumps never release.
     commit-message:
       prefix: ci
+
+  # The documentation site's npm packages, in one weekly PR. Typed ci so the
+  # site's dependencies never cut a petri release.
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+    groups:
+      website:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

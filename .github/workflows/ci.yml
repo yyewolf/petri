@@ -53,6 +53,24 @@ jobs:
       - name: Check the release version matches KubernetesVersion
         run: .github/scripts/check-release-tag.sh "v$(jq -r '.["."]' .release-please-manifest.json)"
 
+  # The documentation site; broken links and missing samples fail the build.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: website/.nvmrc
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Build the site
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+
   lint:
     runs-on: ubuntu-latest
     steps:

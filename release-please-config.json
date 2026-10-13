@@ -17,7 +17,8 @@
   ],
   "packages": {
     ".": {
-      "initial-version": "0.37.0"
+      "initial-version": "0.37.0",
+      "exclude-paths": ["website"]
     }
   }
 }

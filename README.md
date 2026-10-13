@@ -340,6 +340,7 @@ controller-runtime release.
 `main` tracks the newest supported Kubernetes minor. Older minors are
 maintained on `release-1.N` branches. `petri.KubernetesVersion` reports the
 minor a build targets.
+[docs/releasing.md](docs/releasing.md) describes how releases are made.
 
 ## Limitations
 

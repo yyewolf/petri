@@ -28,31 +28,12 @@ packages any more, but cockroachdb/errors still requires it, and the workspace
 build list does not prune it away like a plain module build does. Builds
 without the workspace are unaffected.
 
-## Branches and versions
+## Branches, versions and releases
 
-- `main` tracks the newest supported Kubernetes minor.
-- `release-1.N` branches carry fixes for older minors.
-- Tags are `v0.<k8s minor>.<patch>`, for example `v0.37.2` for Kubernetes 1.37.
-  The patch number increments for any petri change.
-- The `controllerruntime` sub-module is tagged `controllerruntime/v0.<k8s
-  minor>.<patch>` together with each petri tag, and its go.mod requires the
-  matching petri tag.
-- `KubernetesVersion` in `version.go` must match the release line. The release
-  workflow refuses tags that do not match it; for `controllerruntime/` tags it
-  checks the go.mod requirement instead.
-
-## Releasing
-
-1. Make sure `controllerruntime/go.mod` requires the petri version being
-   released, and that `make test` and `make lint` pass for both modules.
-2. Push both tags together:
-
-   ```sh
-   git tag v0.37.2 && git tag controllerruntime/v0.37.2
-   git push origin v0.37.2 controllerruntime/v0.37.2
-   ```
-
-The release workflow drafts a GitHub release for each tag.
+`main` tracks the newest supported Kubernetes minor and `release-1.N` branches
+carry older ones. Versions are `v0.<k8s minor>.<patch>`, and releases are cut
+by merging the release PR that release-please keeps open on each branch. See
+[docs/releasing.md](docs/releasing.md) for the details.
 
 ## The mirrors
 
@@ -103,14 +84,18 @@ release updates it in place, and runs that would push identical content do
 not push. A PR closed without merging comes back only once the release or its
 target branch changes. Updates that fail `make mirror` or the tests open
 as drafts.
-It needs a `MIRROR_TOKEN` secret: a fine-grained personal access token for
-this repository with Contents and Pull requests read/write, because PRs opened
-with the default token do not trigger CI.
+It needs the `BOT_TOKEN` secret described in
+[docs/releasing.md](docs/releasing.md#setup).
 
 ## Pull requests
 
+- Commit messages and PR titles follow
+  [Conventional Commits](https://www.conventionalcommits.org/): `feat:`,
+  `fix:`, `perf:`, `build:`, `refactor:`, `docs:`, `test:`, `ci:` or
+  `chore:`. The changelog is generated from them.
 - The CI `test` and `lint` jobs must pass.
 - Add or update tests for behaviour changes.
-- Update the README when user-facing behaviour changes.
+- Update the README when user-facing behaviour changes, and
+  [docs/design.md](docs/design.md) when a design decision changes.
 - For fixes that apply to an older Kubernetes minor, say so in the PR so it can
   be backported to the matching `release-1.N` branch.

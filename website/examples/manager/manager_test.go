@@ -63,7 +63,13 @@ func TestStamperMarksConfigMaps(t *testing.T) {
 	// ends, and fails the test if it exits early.
 	petricr.StartManager(t, mgr)
 
-	c := mgr.GetClient()
+	// Check results with a direct client: the manager's client reads from its
+	// cache, which lags behind, and cannot watch.
+	c, err := client.NewWithWatch(cp.Config(), client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	cm := &corev1.ConfigMap{}
 	cm.Name, cm.Namespace = "settings", ns
 	err = c.Create(t.Context(), cm)
@@ -71,7 +77,8 @@ func TestStamperMarksConfigMaps(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The condition gets nil while the object does not exist.
 	petricr.WaitFor(t, c, cm, func(cm *corev1.ConfigMap) (bool, error) {
-		return cm.Annotations["stamped"] == "true", nil
+		return cm != nil && cm.Annotations["stamped"] == "true", nil
 	})
 }

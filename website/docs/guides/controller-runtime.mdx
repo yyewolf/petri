@@ -34,7 +34,10 @@ for the same Kubernetes minor.
 - `petricr.WaitFor(t, client, obj, condition)` is [`petri.WaitFor`](waiting.mdx)
   for controller-runtime clients: it follows `obj` by its name and namespace and
   returns it once the condition holds. `petricr.WaitUntil(ctx, ...)` returns
-  an error instead.
+  an error instead. Give it a direct client, from `client.New` or
+  `client.NewWithWatch`, not `mgr.GetClient()`: the manager's client reads a
+  cache that lags behind your test's writes and cannot watch. As with petri's
+  waits, the condition receives `nil` while the object does not exist.
 
 On the shared plane a manager sees every test's objects. Filter your
 controller to the test's namespace, as the example does, or run it on a

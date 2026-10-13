@@ -21,13 +21,15 @@ the decisions and why they were made.
 | `hack/mirror/` | The mirror tool (`make mirror`), its patches in `hack/mirror/patches/`. |
 | `internal/leakcheck/` | Goroutine-leak test for start/stop cycles. |
 | `.github/scripts/` | Workflow scripts, each with a `_test.sh` scenario test. |
-| `docs/` | Design decisions and the release process. |
+| `docs/` | Contributor docs: design decisions and the release process. |
+| `website/` | The documentation site (Docusaurus), published to GitHub Pages. Its `go.mod` holds no code: it only keeps the site out of the petri module. |
+| `website/examples/` | Separate Go module: the site's code samples, as tests. In `go.work`, tested and linted like the other modules. |
 
 ## Commands
 
 ```sh
-make test    # go test -race, both modules
-make lint    # golangci-lint, both modules (strict config: fix, don't silence)
+make test    # go test -race, every module
+make lint    # golangci-lint, every module (strict config: fix, don't silence)
 make fmt     # formatters
 make mirror  # regenerate the mirrors at the recorded versions
 ```
@@ -60,8 +62,18 @@ make mirror  # regenerate the mirrors at the recorded versions
   the release trigger are built from them: `test`, `ci` and `chore` never
   release, everything else does.
 - Never commit planning documents or scratch specs.
-- Update the README when user-facing behaviour changes, and
-  `docs/design.md` when a decision changes.
+- Update the documentation site when user-facing behaviour changes, and
+  `docs/design.md` when a decision changes. The README is a landing page:
+  keep usage details on the site.
+- Every multi-line Go sample on the site is a test under `website/examples`,
+  imported verbatim; never write an uncompiled Go block into a page. The
+  README's Go block is the quickstart test, checked by
+  `.github/scripts/check-readme-sample.sh`.
+- A page describing something merged but not yet released says so with an
+  `:::info Unreleased` admonition; drop it once the release is out.
+- Never edit `website/versioned_docs` or `website/_versioned_examples` except
+  to fix an older line's docs: they are frozen by
+  `website/scripts/version-docs.sh`.
 
 ## Writing tests
 

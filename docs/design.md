@@ -1,7 +1,7 @@
 # petri design
 
 This records the decisions petri is built on and why, so they are not
-re-argued with every change. The README describes what petri does; this
+re-argued with every change. The [documentation site](https://yyewolf.github.io/petri/) describes what petri does; this
 describes the choices behind it. Change a decision here in the same PR that
 changes the code.
 

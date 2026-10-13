@@ -9,10 +9,10 @@
 ## Common tasks
 
 ```sh
-make test   # go test -race ./..., for both modules
-make lint   # golangci-lint config verify + run, for both modules
+make test   # go test -race ./..., for every module
+make lint   # golangci-lint config verify + run, for every module
 make fmt    # format with goimports and golines
-make tidy   # go mod tidy, for both modules
+make tidy   # go mod tidy, for every module
 make mirror # regenerate internal/kubernetes and internal/kine
 ```
 
@@ -20,13 +20,42 @@ make mirror # regenerate internal/kubernetes and internal/kine
 
 ## The Go workspace
 
-The repository root carries a committed `go.work` listing both modules, so the
-`controllerruntime` sub-module builds against the working tree instead of a
-published petri version. It also replaces the final pre-split
+The repository root carries a committed `go.work` listing petri, the
+`controllerruntime` sub-module and the site's `website/examples`, so the last
+two build against the working tree instead of a published petri version. It also replaces the final pre-split
 `google.golang.org/genproto` with an empty stand-in: nothing imports its
 packages any more, but cockroachdb/errors still requires it, and the workspace
 build list does not prune it away like a plain module build does. Builds
 without the workspace are unaffected.
+
+## The documentation site
+
+The site at https://yyewolf.github.io/petri/ is built from `website/` with
+[Docusaurus](https://docusaurus.io/). With Node 24 (see `website/.nvmrc`):
+
+```sh
+cd website
+npm ci
+npm start       # live preview at http://localhost:3000/petri/
+npm run build   # what CI runs: fails on broken links
+```
+
+Code samples are tests in the `website/examples` module, one directory per
+page, and pages import them whole:
+
+```mdx
+import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
+
+<CodeBlock language="go" title="drain_test.go">{Drain}</CodeBlock>
+```
+
+They run with `make test`, so a sample that stops compiling or passing fails
+CI. The README's Go sample is the quickstart test; CI checks that the two
+match.
+
+Docs are versioned by release line. `website/scripts/version-docs.sh 0.N`
+freezes a line's pages and samples; the Mirror workflow runs it when `main`
+moves to a new minor (see [docs/releasing.md](docs/releasing.md#docs-for-each-release-line)).
 
 ## Branches, versions and releases
 
@@ -96,7 +125,7 @@ needs.
   `chore:`. The changelog is generated from them.
 - The CI `test` and `lint` jobs must pass.
 - Add or update tests for behaviour changes.
-- Update the README when user-facing behaviour changes, and
+- Update the documentation site when user-facing behaviour changes, and
   [docs/design.md](docs/design.md) when a design decision changes.
 - For fixes that apply to an older Kubernetes minor, say so in the PR so it can
   be backported to the matching `release-1.N` branch.

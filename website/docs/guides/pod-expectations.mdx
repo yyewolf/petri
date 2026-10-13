@@ -1,0 +1,86 @@
+---
+sidebar_position: 8
+description: Place Pods by hand and assert which Pods get created, gomock-style.
+---
+
+import CodeBlock from '@theme/CodeBlock';
+import Bind from '!!raw-loader!@site/examples/placement/bind_test.go';
+import Expectations from '!!raw-loader!@site/examples/placement/expectations_test.go';
+import Job from '!!raw-loader!@site/examples/placement/job_test.go';
+
+# Manual placement and Pod expectations
+
+Without kube-scheduler, a Pod stays Pending until the test places it. That
+turns placement into an assertion point, the way a mock turns a call into
+one: the test states which Pods it expects your code to create, and decides
+where each one runs.
+
+The samples run on a [dedicated plane with Nodes](nodes.mdx).
+
+## One Pod at a time
+
+`cp.ExpectPod(t, matchers...)` waits for a Pending, unscheduled Pod that
+matches, and hands it over once: the same Pod is never returned twice.
+`cp.Bind(t, pod, node)` places it with the `pods/binding` call kube-scheduler
+makes.
+
+<CodeBlock language="go" title="bind_test.go">{Bind}</CodeBlock>
+
+## Declaring expectations
+
+`cp.ExpectPods(t, matchers...)` registers an expectation that claims matching
+Pods as they are created, before anything else sees them:
+
+<CodeBlock language="go" title="expectations_test.go">{Expectations}</CodeBlock>
+
+| Method | Meaning |
+|---|---|
+| `Times(n)` | Claim `n` Pods; the default is one. Later matching Pods are left unclaimed. |
+| `AnyTimes()` | Any number, zero included. |
+| `BindTo(node)` | Bind each claimed Pod to `node`. |
+| `Do(func(ctx, pod) error)` | Run your own action on each claimed Pod. |
+| `Wait(t)` | Wait until the expected number of Pods were claimed and acted on. |
+| `Pods()` | The Pods claimed so far. |
+
+When the test ends, every expectation is checked: one that claimed fewer Pods
+than it expected fails the test. An expectation never claims more than its
+count, so to catch extra Pods, call `cp.StrictPods(t)`: it fails the test for
+every Pod no expectation claimed.
+
+Expectations claim Pods in the order they were registered, and before
+`ExpectPod`, so a Pod goes to the first expectation that matches it.
+
+## Matchers
+
+| Matcher | Matches Pods |
+|---|---|
+| `petri.InNamespace(ns)` | in a namespace |
+| `petri.Labeled(key, value)` | with a label |
+| `petri.OwnedBy(obj)` | owned by an object, by UID |
+| `petri.PodMatching(description, func(*corev1.Pod) bool)` | for anything else; the description shows in failure messages |
+
+Several matchers must all match.
+
+## Finishing Pods
+
+No container runs, so the test decides how a Pod ends. That is how Jobs
+complete:
+
+<CodeBlock language="go" title="job_test.go">{Job}</CodeBlock>
+
+- `cp.CompletePod(t, pod)` marks it `Succeeded`, its containers terminated with
+  exit code 0.
+- `cp.FailPod(t, pod, exitCode)` marks it `Failed`.
+- `cp.SetPodReady(t, pod, ready)` flips its readiness, for testing how your
+  code reacts to a Pod going unready.
+- `cp.Evict(t, pod)` evicts it through the Eviction API, so
+  PodDisruptionBudgets apply.
+
+The simulated kubelet never overrides what the test set.
+
+## Scheduler or by hand
+
+A plane places Pods one way. `Bind`, `ExpectPod` and `ExpectPods` fail the test
+on a plane running `SchedulerController`, and enabling the scheduler on a plane
+with expectations fails too. The shared plane refuses all of them, as it has no
+Nodes.

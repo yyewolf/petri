@@ -1,5 +1,84 @@
 ---
 sidebar_position: 6
+description: The controllers petri runs, which are on by default, and how to enable the rest.
 ---
 
+import CodeBlock from '@theme/CodeBlock';
+import Nodeless from '!!raw-loader!@site/examples/controllers/nodeless_test.go';
+
 # Built-in controllers
+
+petri runs upstream kube-controller-manager controllers, the same code a
+cluster runs, inside your test process. It does not run kube-controller-manager
+itself: a small manager starts each controller with shared informers when a
+test asks for it.
+
+## On by default
+
+The namespace controller and the garbage collector run on every plane, shared
+or dedicated:
+
+- a deleted namespace is emptied and removed;
+- deleting an owner deletes its dependents, with background, foreground and
+  orphan propagation, for built-in kinds and custom resources alike.
+
+`Start` and `New` return once their informers are synced, so the first object
+a test creates is seen by both. This is the main behavioural difference from
+envtest; a dedicated plane started with `petri.WithoutDefaultControllers()`
+runs without them.
+
+## Enabling the others
+
+`cp.EnableControllers(t, controllers...)` starts controllers and returns once
+their informers are synced, so an object created on the next line is seen.
+
+<CodeBlock language="go" title="nodeless_test.go">{Nodeless}</CodeBlock>
+
+- Enabling is idempotent and safe from parallel tests. On the shared plane, a
+  controller stays enabled for every later test once one test enabled it.
+- Enabling a controller never enables another. The Deployment controller alone
+  creates ReplicaSets but no Pods.
+- `petri.WorkloadControllers()` returns all the workload controllers at once.
+
+| Controller | What it does |
+|---|---|
+| `DeploymentController` | Rolls Deployments out through ReplicaSets. |
+| `ReplicaSetController` | Keeps `spec.replicas` Pods per ReplicaSet. |
+| `StatefulSetController` | Creates StatefulSet Pods in order. |
+| `DaemonSetController` | Places one Pod per eligible Node. |
+| `JobController` | Runs Jobs' Pods and marks Jobs complete or failed. |
+| `CronJobController` | Creates Jobs on a schedule. |
+| `TTLAfterFinishedController` | Deletes finished Jobs after `ttlSecondsAfterFinished`. |
+| `EndpointSliceController` | Keeps an EndpointSlice per Service with a selector. |
+| `ServiceAccountController` | Keeps a `default` ServiceAccount in every namespace. |
+| `ServiceAccountTokenController` | Fills legacy service-account token Secrets with a token the API server accepts. |
+| `ResourceQuotaController` | Keeps quotas' `status.used` current. Quota admission is on regardless, so hard limits are enforced even with the controller off. |
+| `DisruptionController` | Computes PodDisruptionBudget statuses. |
+| `SchedulerController` | kube-scheduler; see [Nodes and scheduling](nodes.mdx). |
+
+## Without Nodes
+
+The shared plane has no Nodes, and neither does a dedicated plane until a test
+adds some. Pods then stay `Pending`, and each workload controller stops where
+it would need a running Pod:
+
+| Controller | On a plane without Nodes |
+|---|---|
+| Deployment, ReplicaSet | Create Pods, which stay Pending; Deployments never become Available. |
+| StatefulSet | With the default `OrderedReady` policy, creates Pod 0 and waits for it forever. |
+| DaemonSet | Creates no Pods: there is no Node to run them on. |
+| Job | Creates Pods up to `parallelism`; the Job never completes. |
+| EndpointSlice | Creates EndpointSlices with no endpoints: no Pod is ever Ready. |
+| Disruption | Every budget settles on zero `disruptionsAllowed`. |
+
+That is often all a test needs: an operator that creates Deployments can be
+tested on what it created, without anything running. When a test needs the
+whole chain, add [Nodes](nodes.mdx) on a dedicated plane, and Deployments
+become Available, StatefulSets roll out and Jobs complete when the test
+completes their Pods.
+
+## CronJobs
+
+The CronJob controller schedules by the wall clock, and upstream gives no way
+to inject a clock. To test what a CronJob runs, create a Job from its
+`spec.jobTemplate` in the test instead of waiting for the schedule.

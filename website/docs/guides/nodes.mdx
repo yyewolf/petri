@@ -1,5 +1,87 @@
 ---
 sidebar_position: 7
+description: Add simulated Nodes, run kube-scheduler, and drive Node failures.
 ---
 
+import CodeBlock from '@theme/CodeBlock';
+import Plane from '!!raw-loader!@site/examples/nodes/plane_test.go';
+import Scheduler from '!!raw-loader!@site/examples/nodes/scheduler_test.go';
+import Drain from '!!raw-loader!@site/examples/nodes/drain_test.go';
+import NotReady from '!!raw-loader!@site/examples/nodes/notready_test.go';
+
 # Nodes and scheduling
+
+A dedicated plane can have Nodes. They are simulated the way
+[kwok](https://kwok.sigs.k8s.io/) simulates them: no container ever runs, but a
+Pod placed on a Node goes `Running` and `Ready` at once, with an IP from the
+Node's PodCIDR, and a deleted Pod goes away at once. Workload controllers then
+behave as on a cluster.
+
+Nodes belong to the whole cluster, so only [dedicated planes](control-planes.mdx#dedicated-control-planes)
+have them: the shared plane refuses every Node operation, so that one test's
+Nodes never run another test's Pods. The samples on this page share a helper
+that starts one:
+
+<CodeBlock language="go" title="plane_test.go">{Plane}</CodeBlock>
+
+## Adding Nodes
+
+`cp.AddNode(t, petri.NodeOptions{...})` creates a Ready Node and deletes it when
+the test ends. Every option is optional:
+
+| Option | Default |
+|---|---|
+| `Name` | `petri-node-<n>` |
+| `Labels`, `Annotations` | yours, plus the well-known `kubernetes.io/hostname`, `kubernetes.io/os` (`linux`) and `kubernetes.io/arch` (`amd64`) labels |
+| `Taints` | none |
+| `Capacity` | 32 CPUs, 256Gi of memory, 1Ti of ephemeral storage, 110 Pods |
+| `Unschedulable` | `false`; `true` creates the Node cordoned |
+
+Each Node gets its own PodCIDR and InternalIP, and reports a kubelet version
+and conditions as a real kubelet would.
+
+## kube-scheduler
+
+Enable `petri.SchedulerController` and upstream kube-scheduler, with its
+default profile, places Pods by requests, taints and tolerations, node
+selectors, affinities and topology spread:
+
+<CodeBlock language="go" title="scheduler_test.go">{Scheduler}</CodeBlock>
+
+Without the scheduler, Pods stay Pending until the test places them; see
+[manual placement and Pod expectations](pod-expectations.mdx). A plane uses one
+or the other: enabling the scheduler on a plane where the test placed Pods by
+hand fails the test, and the reverse too.
+
+## Changing Nodes
+
+The `*petri.Node` that `AddNode` returns changes the Node the way an operator or
+a failing kubelet would:
+
+| Method | Effect |
+|---|---|
+| `Taint`, `Untaint` | Add or remove taints. |
+| `Cordon`, `Uncordon` | Mark the Node unschedulable, or not. |
+| `Drain` | Cordon, then evict every Pod but DaemonSet Pods through the Eviction API, retrying while a PodDisruptionBudget refuses. |
+| `SetReady` | Report the Node Ready or not, with the matching `not-ready` taint. |
+| `Delete` | Delete the Node and force-delete the Pods bound to it, as the Pod garbage collector does on a cluster. |
+
+<CodeBlock language="go" title="drain_test.go">{Drain}</CodeBlock>
+
+## Node failures
+
+A Node that is not Ready has a frozen kubelet: Pods bound to it stay Pending,
+and Pods deleted from it stay `Terminating`, until it is Ready again.
+
+<CodeBlock language="go" title="notready_test.go">{NotReady}</CodeBlock>
+
+petri runs no node lifecycle controller, so nothing reacts to a NotReady Node
+on its own: no taint-based eviction, no `tolerationSeconds`. The test drives
+what happens next, for example with `Drain` or `Delete`.
+
+## What is not simulated
+
+No container runs, so probes, images, volumes, resource usage and restarts do
+not exist, and readiness gates are ignored. Pods stay `Running` until the test
+finishes them with `CompletePod` or `FailPod`, or deletes them. There are no
+Node heartbeats or Leases.

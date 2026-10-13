@@ -2,6 +2,9 @@ name: CI
 
 on:
   pull_request:
+  # Bot PRs (release, mirror) come from the workflow token, which starts no
+  # workflow; their workflows dispatch CI on the PR branch instead.
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -40,7 +43,7 @@ jobs:
   # A release PR must stay on the release line version.go declares: after a
   # Kubernetes minor move, the next release is v0.<new minor>.0, not a patch.
   release-pr:
-    if: startsWith(github.head_ref, 'release-please--')
+    if: startsWith(github.head_ref || github.ref_name, 'release-please--')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

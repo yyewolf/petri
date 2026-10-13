@@ -39,6 +39,13 @@ jobs:
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
+    # The workflow token pushes mirror/<branch> and release-1.N, opens the PR,
+    # and dispatches CI on it: GitHub starts no workflow for its pushes or PRs.
+    # This needs "Allow GitHub Actions to create and approve pull requests".
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -48,15 +55,6 @@ jobs:
       KIND: ${{ matrix.kind }}
       KINE: ${{ matrix.kine }}
     steps:
-      - name: Require BOT_TOKEN
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          if [[ -z "$BOT_TOKEN" ]]; then
-            echo "::error::Set the BOT_TOKEN secret: a fine-grained personal access token for this repository with Contents, Issues and Pull requests read/write. PRs opened with GITHUB_TOKEN do not trigger CI."
-            exit 1
-          fi
-
       - uses: actions/checkout@v7
         with:
           ref: ${{ matrix.branch }}
@@ -72,9 +70,9 @@ jobs:
       - name: Cut the release branch for the outgoing minor
         if: matrix.kind == 'minor'
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TOKEN: ${{ github.token }}
         run: |
-          remote="https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          remote="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           minor=$(sed -n 's/^const KubernetesVersion = "\(.*\)"$/\1/p' version.go)
           release="release-$minor"
           if git ls-remote --exit-code --heads "$remote" "$release" >/dev/null; then
@@ -115,8 +113,8 @@ jobs:
 
       - name: Open or update the pull request
         env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-          REMOTE: https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }}.git
+          GH_TOKEN: ${{ github.token }}
+          REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
           MIRROR_OUTCOME: ${{ steps.mirror.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
           SUBMODULE_OUTCOME: ${{ steps.submodule.outputs.outcome || (matrix.kind == 'minor' && 'skipped' || '') }}

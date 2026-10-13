@@ -85,10 +85,18 @@ git commit --allow-empty -m "chore: release 0.38.0" -m "Release-As: 0.38.0"
 
 ## Setup
 
-The workflows need one repository secret, `BOT_TOKEN`: a fine-grained personal
-access token for this repository with **Contents**, **Issues** and **Pull
-requests** read/write. release-please and the Mirror workflow open PRs with
-it, because PRs opened with the default `GITHUB_TOKEN` do not trigger CI.
+There is no secret to manage: the workflows use their own `GITHUB_TOKEN`. The
+repository needs one setting, under *Settings → Actions → General → Workflow
+permissions*: **Allow GitHub Actions to create and approve pull requests**, so
+release-please and the Mirror workflow can open their PRs. Each workflow
+declares the permissions it needs, so the default token permission can stay
+read-only.
+
+GitHub starts no workflow for pushes and PRs made with that token, so the bot
+PRs would get no CI. The Release and Mirror workflows therefore dispatch CI
+(`gh workflow run ci.yml --ref <branch>`) on the branch they pushed; its
+checks attach to the head commit and show on the PR. To re-run CI on a bot PR
+by hand, do the same from the Actions tab or with `gh`.
 
 While the repository is private, the Release workflow fetches petri from git
 rather than the module proxy (`GOPRIVATE`). Nothing needs to change when it

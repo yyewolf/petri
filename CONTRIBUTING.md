@@ -84,8 +84,9 @@ release updates it in place, and runs that would push identical content do
 not push. A PR closed without merging comes back only once the release or its
 target branch changes. Updates that fail `make mirror` or the tests open
 as drafts.
-It needs the `BOT_TOKEN` secret described in
-[docs/releasing.md](docs/releasing.md#setup).
+It opens PRs with the workflow token and dispatches CI on them; see
+[docs/releasing.md](docs/releasing.md#setup) for the repository settings this
+needs.
 
 ## Pull requests
 

@@ -12,6 +12,8 @@
 #   SUBMODULE_OUTCOME outcome of the controllerruntime bump on a minor move:
 #                    success, none (no controller-runtime release yet), skipped
 #   REMOTE           URL to push to
+#   CI_WORKFLOW      workflow to dispatch on the PR branch after a push
+#                    (default ci.yml)
 #   RUN_URL          link to the workflow run (optional)
 #   GH               gh binary to use (optional; tests stub it)
 set -euo pipefail
@@ -99,6 +101,15 @@ elif [[ "$KIND" == minor && "${SUBMODULE_OUTCOME:-}" != success && "${SUBMODULE_
 **Needs a human:** the controllerruntime sub-module bump did not complete (outcome: ${SUBMODULE_OUTCOME:-skipped})${RUN_URL:+, see [this run]($RUN_URL)}."
 fi
 
+# The workflow token pushes the branch and opens the PR, and GitHub starts no
+# workflow for what that token does, so CI is dispatched on the branch: its
+# checks attach to the head commit and show on the PR.
+dispatch_ci() {
+	if [[ "$changed" == true ]]; then
+		"$gh" workflow run "${CI_WORKFLOW:-ci.yml}" --ref "$head"
+	fi
+}
+
 read -r number is_draft < <("$gh" pr list --head "$head" --base "$BRANCH" --state open \
 	--json number,isDraft --jq '.[0] | select(.) | "\(.number) \(.isDraft)"') || true
 
@@ -112,6 +123,7 @@ if [[ -z "${number:-}" ]]; then
 	draft=()
 	if [[ "$broken" == true ]]; then draft=(--draft); fi
 	"$gh" pr create --base "$BRANCH" --head "$head" --title "$title" --body "$body" "${draft[@]}"
+	dispatch_ci
 	exit 0
 fi
 
@@ -121,3 +133,4 @@ if [[ "$broken" == true && "$is_draft" == false ]]; then
 elif [[ "$broken" == false && "$is_draft" == true ]]; then
 	"$gh" pr ready "$number"
 fi
+dispatch_ci

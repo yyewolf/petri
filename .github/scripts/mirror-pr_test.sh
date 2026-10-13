@@ -57,6 +57,7 @@ run v1.37.2 v1.37.2 success success ""
 [[ -n "$(remote_head)" ]] || fail "mirror/main not pushed"
 logged "pr create --base main --head mirror/main --title build: mirror Kubernetes v1.37.2" || fail "no pr create: $(cat "$tmp/gh.log")"
 logged "--draft" && fail "opened as draft"
+logged "workflow run ci.yml --ref mirror/main" || fail "CI not dispatched: $(cat "$tmp/gh.log")"
 pushed=$(remote_head)
 
 case="unchanged rerun does not push"
@@ -65,6 +66,7 @@ run v1.37.2 v1.37.2 success success "7 false"
 [[ "$(remote_head)" == "$pushed" ]] || fail "mirror/main was pushed again"
 logged "pr create" && fail "opened a second PR"
 logged "pr ready" && fail "changed draft state"
+logged "workflow run" && fail "CI dispatched for an unchanged branch"
 
 case="unchanged content with no open PR leaves a closed PR closed"
 run v1.37.2 v1.37.2 success success ""
@@ -78,6 +80,7 @@ run v1.37.3 v1.37.3 success failure "7 false"
 logged "pr edit 7 --title build: mirror Kubernetes v1.37.3" || fail "PR not retitled: $(cat "$tmp/gh.log")"
 logged "pr ready 7 --undo" || fail "PR not moved to draft"
 logged "pr create" && fail "opened a second PR"
+logged "workflow run ci.yml --ref mirror/main" || fail "CI not dispatched after an update"
 
 case="fixed update marks the draft PR ready"
 run v1.37.3 v1.37.3 success success "7 true"

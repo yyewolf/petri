@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.37.1](https://github.com/yyewolf/petri/compare/v0.37.0...v0.37.1) (2026-10-13)
+
+
+### Documentation
+
+* add the controller-runtime, envtest and framework guides ([e2e3950](https://github.com/yyewolf/petri/commit/e2e39506c568edf89528faec987325ac83a2e2fa))
+* add the examples module and the getting started page ([9c0e3d3](https://github.com/yyewolf/petri/commit/9c0e3d35b33c023d846246a1dd3b4e11321177d4))
+* fix the Ginkgo guidance and review findings on the site ([a9ba508](https://github.com/yyewolf/petri/commit/a9ba508cefe1a20f1edf3174499b14aaed25a573))
+* say what the controllerruntime module is for, and that it is optional ([f9487c0](https://github.com/yyewolf/petri/commit/f9487c0d0189d2b0d53348c4e211e0b42d9391ee))
+* scaffold the documentation site ([d1c5a8f](https://github.com/yyewolf/petri/commit/d1c5a8f4fe64fb350722d6b0bfc7027add457a12))
+* simplify the site, README and contributor docs ([97c2872](https://github.com/yyewolf/petri/commit/97c28720370c0231b4f8aafe5b5c6f1ac4ca8630))
+* slim the README to a landing page ([bd34aa5](https://github.com/yyewolf/petri/commit/bd34aa5e39a79a503ac85fe5c5aeff250bc492e6))
+
 ## 0.37.0 (2026-10-13)
 
 

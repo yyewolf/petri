@@ -1,24 +1,95 @@
 name: Release
 
+# release-please keeps a release PR open on each branch with the changelog
+# since the last release; merging it tags v0.<k8s minor>.<patch> and publishes
+# the GitHub release. The controllerruntime sub-module follows: its go.mod can
+# only require the new petri tag once that tag exists, so it gets its own
+# commit and tag right after. See docs/releasing.md.
+
 on:
   push:
-    tags:
-      - "v*"
-      - "controllerruntime/v*"
+    branches:
+      - main
+      - "release-*"
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  draft:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Require BOT_TOKEN
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          if [[ -z "$BOT_TOKEN" ]]; then
+            echo "::error::Set the BOT_TOKEN secret: a fine-grained personal access token for this repository with Contents, Issues and Pull requests read/write. PRs opened with GITHUB_TOKEN do not trigger CI."
+            exit 1
+          fi
+
+      - id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.BOT_TOKEN }}
+          target-branch: ${{ github.ref_name }}
+
+  controllerruntime:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
+      BRANCH: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      # While the repository is private the module proxy cannot see it; fetch
+      # petri straight from git with the checkout's credentials instead.
+      GOPRIVATE: ${{ github.event.repository.private && 'github.com/yyewolf/petri' || '' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
 
-      - name: Check tag matches KubernetesVersion
-        run: .github/scripts/check-release-tag.sh "$GITHUB_REF_NAME"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
 
-      - name: Draft GitHub release
+      - name: Check the tag matches KubernetesVersion
+        run: .github/scripts/check-release-tag.sh "$TAG"
+
+      - name: Keep older release lines from becoming the latest release
+        if: github.ref_name != 'main'
+        run: gh release edit "$TAG" --latest=false
+
+      # GOWORK=off: this is what users get, without the workspace's local petri.
+      - name: Require the new petri tag
+        working-directory: controllerruntime
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+          GOWORK: "off"
+        run: |
+          go mod edit -require="github.com/yyewolf/petri@$TAG"
+          go mod tidy
+          go build ./...
+          go vet ./...
+
+      - name: Commit and tag controllerruntime
+        run: |
+          sub="controllerruntime/$TAG"
+          git -c user.name=petri-release -c user.email=petri-release@users.noreply.github.com \
+            commit -q -am "chore: release $sub"
+          .github/scripts/check-release-tag.sh "$sub"
+          git tag "$sub"
+          git push --atomic origin "HEAD:refs/heads/$BRANCH" "refs/tags/$sub"
+
+      - name: Publish the controllerruntime release
+        run: |
+          gh release create "controllerruntime/$TAG" --verify-tag --latest=false \
+            --title "controllerruntime/$TAG" \
+            --notes "The controllerruntime sub-module for petri [$TAG](${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG), which lists the changes."

@@ -48,12 +48,12 @@ jobs:
       KIND: ${{ matrix.kind }}
       KINE: ${{ matrix.kine }}
     steps:
-      - name: Require MIRROR_TOKEN
+      - name: Require BOT_TOKEN
         env:
-          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
-          if [[ -z "$MIRROR_TOKEN" ]]; then
-            echo "::error::Set the MIRROR_TOKEN secret: a fine-grained personal access token for this repository with Contents and Pull requests read/write. PRs opened with GITHUB_TOKEN do not trigger CI."
+          if [[ -z "$BOT_TOKEN" ]]; then
+            echo "::error::Set the BOT_TOKEN secret: a fine-grained personal access token for this repository with Contents, Issues and Pull requests read/write. PRs opened with GITHUB_TOKEN do not trigger CI."
             exit 1
           fi
 
@@ -72,9 +72,9 @@ jobs:
       - name: Cut the release branch for the outgoing minor
         if: matrix.kind == 'minor'
         env:
-          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
-          remote="https://x-access-token:${MIRROR_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          remote="https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           minor=$(sed -n 's/^const KubernetesVersion = "\(.*\)"$/\1/p' version.go)
           release="release-$minor"
           if git ls-remote --exit-code --heads "$remote" "$release" >/dev/null; then
@@ -115,8 +115,8 @@ jobs:
 
       - name: Open or update the pull request
         env:
-          GH_TOKEN: ${{ secrets.MIRROR_TOKEN }}
-          REMOTE: https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/${{ github.repository }}.git
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          REMOTE: https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }}.git
           MIRROR_OUTCOME: ${{ steps.mirror.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
           SUBMODULE_OUTCOME: ${{ steps.submodule.outputs.outcome || (matrix.kind == 'minor' && 'skipped' || '') }}

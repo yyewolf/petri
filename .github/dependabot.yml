@@ -6,3 +6,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Conventional commit type for release-please: action bumps never release.
+    commit-message:
+      prefix: ci

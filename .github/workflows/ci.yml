@@ -37,6 +37,17 @@ jobs:
           .github/scripts/bump-submodule_test.sh
           .github/scripts/mirror-pr_test.sh
 
+  # A release PR must stay on the release line version.go declares: after a
+  # Kubernetes minor move, the next release is v0.<new minor>.0, not a patch.
+  release-pr:
+    if: startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the release version matches KubernetesVersion
+        run: .github/scripts/check-release-tag.sh "v$(jq -r '.["."]' .release-please-manifest.json)"
+
   lint:
     runs-on: ubuntu-latest
     steps:

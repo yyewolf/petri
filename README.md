@@ -20,7 +20,7 @@
 
 ```bash
 go get github.com/yyewolf/petri@v0.37
-# for controller-runtime and the envtest drop-in:
+# optional: the envtest drop-in and controller-runtime test helpers
 go get github.com/yyewolf/petri/controllerruntime@v0.37
 ```
 

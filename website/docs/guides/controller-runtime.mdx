@@ -8,28 +8,39 @@ import Manager from '!!raw-loader!@site/examples/manager/manager_test.go';
 
 # controller-runtime
 
-The `github.com/yyewolf/petri/controllerruntime` module connects petri to
-[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
-It is a separate module, so petri itself does not depend on
-controller-runtime:
+[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime)
+needs nothing from petri but a `*rest.Config`: pass `cp.Config()` to
+`ctrl.NewManager` and run your manager as usual.
+
+The optional `github.com/yyewolf/petri/controllerruntime` module saves the
+code every suite ends up writing around that:
+
+- starting the manager, waiting for its caches, and stopping it when the test
+  ends;
+- waiting on objects through a controller-runtime client, which is how most
+  operators read their own API types;
+- an [envtest drop-in](migrating-from-envtest.mdx) for existing kubebuilder
+  suites.
 
 ```bash
 go get github.com/yyewolf/petri/controllerruntime@v0.37
 ```
 
-It has the same version as petri, and requires the controller-runtime release
-built for the same Kubernetes minor.
+It has the same version as petri and requires the controller-runtime release
+built for the same Kubernetes minor. It is a separate module so that petri
+itself does not depend on controller-runtime, and so petri can move to a new
+Kubernetes minor before controller-runtime supports it.
 
 ## Running a manager
 
 <CodeBlock language="go" title="manager_test.go">{Manager}</CodeBlock>
 
-- `petricr.NewManager(t, cfg, options...)` builds a manager for tests. Metrics
-  and health probes are off, so parallel tests never fight over ports, and
-  there is no leader election. `petricr.WithScheme(scheme)` sets the scheme for
-  your API types. `petricr.WithWebhookServer(server)` attaches a webhook
-  server, for example one that serves from
-  [`cp.ServingCertDir(t)`](webhooks.mdx).
+- `petricr.NewManager(t, cfg, options...)` builds a manager for tests. It turns
+  the metrics server off, so managers in parallel tests never compete for
+  `:8080`, and registers the built-in Kubernetes types.
+  `petricr.WithScheme(scheme)` sets the scheme for your API types.
+  `petricr.WithWebhookServer(server)` attaches a webhook server, for example
+  one that serves from [`cp.ServingCertDir(t)`](webhooks.mdx).
 - `petricr.StartManager(t, mgr)` starts the manager and returns once its caches
   have synced. It stops the manager when the test ends, and fails the test if
   the manager exits early. A stopped manager leaves no goroutines behind.

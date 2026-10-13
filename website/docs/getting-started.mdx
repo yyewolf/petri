@@ -24,8 +24,10 @@ release as your client libraries:
 |-----------|------------|--------------------|
 | `v0.37.x` | 1.37       | `v0.37.x`          |
 
-If you use controller-runtime, add the sub-module too. It requires the
-controller-runtime release built for the same Kubernetes minor:
+controller-runtime works with petri as it is: pass `cp.Config()` to
+`ctrl.NewManager`. The optional sub-module adds a drop-in replacement for
+envtest and a few test helpers; see
+[controller-runtime](guides/controller-runtime.mdx). To use it:
 
 ```bash
 go get github.com/yyewolf/petri/controllerruntime@v0.37

@@ -61,18 +61,9 @@ run v1.38.1
 [[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
 grep -qF "get sigs.k8s.io/controller-runtime@v0.26.0" "$tmp/go.log" || fail "wrong controller-runtime: $(grep get "$tmp/go.log" | head -2)"
 grep -qF "get k8s.io/api@v0.38.1" "$tmp/go.log" || fail "staging modules not bumped"
-grep -qF "github.com/yyewolf/petri v0.38.0" "$tmp/controllerruntime/go.mod" || fail "petri require not bumped: $(cat "$tmp/controllerruntime/go.mod")"
-
-case="a pseudo-version petri require is replaced whole"
-# A pre-release go.mod can pin petri at a pseudo-version; the replacement must
-# cover the entire version token, not just its tag-shaped prefix.
-stub_go v0.38.0 v0.37.0
-seed v0.38.1 v0.37.1
-sed -i 's|github.com/yyewolf/petri v0.37.2|github.com/yyewolf/petri v0.0.0-20261011200139-b7f39b53678a|' "$tmp/controllerruntime/go.mod"
-run v1.38.1
-[[ $status == 0 ]] || fail "exit $status: $(cat "$tmp/out.log")"
-grep -qF "github.com/yyewolf/petri v0.38.0" "$tmp/controllerruntime/go.mod" || fail "pseudo-version not replaced: $(grep yyewolf "$tmp/controllerruntime/go.mod")"
-grep -qF "v0.38.0-20261011200139" "$tmp/controllerruntime/go.mod" && fail "replacement corrupted a pseudo-version: $(grep yyewolf "$tmp/controllerruntime/go.mod")"
+# The release workflow moves the petri require once the new tag exists; a
+# require on a tag that does not exist yet would break workspace builds.
+grep -qF "github.com/yyewolf/petri v0.37.2" "$tmp/controllerruntime/go.mod" || fail "petri require touched: $(grep yyewolf "$tmp/controllerruntime/go.mod")"
 
 case="an older controller-runtime release stops the search"
 # v0.26.0 requires 0.37 (older than the target minor): nothing matches.

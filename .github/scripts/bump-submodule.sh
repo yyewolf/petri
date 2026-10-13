@@ -2,9 +2,10 @@
 # Bumps the controllerruntime sub-module to the Kubernetes minor being
 # mirrored: the staging module versions from the root go.mod, which the mirror
 # has already pinned, and the newest controller-runtime release that requires
-# them. The petri requirement is written as the upcoming minor tag, which
-# exists by the time the sub-module is released; the go.work keeps local and CI
-# builds on the working tree until then.
+# them. The petri requirement is left alone: a require on a petri tag that does
+# not exist yet breaks even workspace builds, so the release workflow moves it
+# once it has tagged petri. The go.work keeps local and CI builds on the
+# working tree meanwhile.
 #
 # Exits 2 when no controller-runtime for the minor is released yet, so the
 # mirror workflow can still open its PR as a draft.
@@ -70,12 +71,6 @@ cd controllerruntime
 # the explicit get then pins the exact versions petri mirrors.
 "$go_cmd" get "sigs.k8s.io/controller-runtime@$controller_runtime"
 "$go_cmd" get "k8s.io/api@$staging" "k8s.io/apimachinery@$staging" "k8s.io/client-go@$staging"
-
-sed -i "s|github.com/yyewolf/petri v[^ ]*|github.com/yyewolf/petri v0.$minor.0|" go.mod
-if ! grep -q "github.com/yyewolf/petri v0.$minor.0" go.mod; then
-	echo "error: controllerruntime/go.mod does not require github.com/yyewolf/petri" >&2
-	exit 1
-fi
 
 "$go_cmd" mod tidy
 echo "bumped controllerruntime to Kubernetes 1.$minor with controller-runtime $controller_runtime"

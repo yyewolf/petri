@@ -1,5 +1,5 @@
 {
-  "kubernetes": "v1.37.1",
+  "kubernetes": "v1.37.2",
   "roots": [
     "k8s.io/kubernetes/cmd/kube-apiserver/app",
     "k8s.io/kubernetes/cmd/kube-apiserver/app/options",

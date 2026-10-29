@@ -1,5 +1,5 @@
 {
-  "kine": "v0.17.2",
+  "kine": "v0.17.3",
   "roots": [
     "github.com/k3s-io/kine/pkg/drivers/memory",
     "github.com/k3s-io/kine/pkg/server"

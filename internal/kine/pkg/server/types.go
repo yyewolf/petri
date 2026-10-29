@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/yyewolf/petri/internal/kine/pkg/query"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,8 +49,9 @@ type Dialect interface {
 	Count(ctx context.Context, key, end string, revision int64) (int64, int64, int64, error)
 	CurrentRevision(ctx context.Context) (int64, error)
 	After(ctx context.Context, key, end string, rev, limit int64) (*sql.Rows, error)
-	//nolint:revive
-	Insert(ctx context.Context, key string, create, delete bool, createRevision, previousRevision int64, ttl int64, value []byte) (int64, error)
+	PrepareAfter(ctx context.Context, limit int64) (*query.Stmt, error)
+	QueryAfter(ctx context.Context, stmt *query.Stmt, rev int64) (*sql.Rows, error)
+	Insert(ctx context.Context, key string, created, deleted bool, previousRevision int64, ttl int64, value []byte) (int64, error)
 	DeleteRevision(ctx context.Context, revision int64) error
 	GetCompactRevision(ctx context.Context) (int64, error)
 	SetCompactRevision(ctx context.Context, revision int64) error
@@ -57,6 +59,7 @@ type Dialect interface {
 	PostCompact(ctx context.Context) error
 	Fill(ctx context.Context, revision int64) error
 	IsFill(key string) bool
+	IsTxRetry(err error) bool
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (Transaction, error)
 	GetSize(ctx context.Context) (int64, error)
 	FillRetryDelay(ctx context.Context)
@@ -71,6 +74,7 @@ type Transaction interface {
 	GetCompactRevision(ctx context.Context) (int64, error)
 	SetCompactRevision(ctx context.Context, revision int64) error
 	Compact(ctx context.Context, from, to int64) (int64, error)
+	Insert(ctx context.Context, key string, created, deleted bool, previousRevision int64, ttl int64, value []byte) (int64, error)
 	DeleteRevision(ctx context.Context, revision int64) error
 	CurrentRevision(ctx context.Context) (int64, error)
 }
